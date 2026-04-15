@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -181,16 +182,18 @@ export default function StatsScreen() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const info = await FileSystem.getInfoAsync(HISTORY_PATH);
-      if (info.exists) {
-        const raw = await FileSystem.readAsStringAsync(HISTORY_PATH);
-        setHistory(JSON.parse(raw));
-      }
-      setLoaded(true);
-    })();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        const info = await FileSystem.getInfoAsync(HISTORY_PATH);
+        if (info.exists) {
+          const raw = await FileSystem.readAsStringAsync(HISTORY_PATH);
+          setHistory(JSON.parse(raw));
+        }
+        setLoaded(true);
+      })();
+    }, [])
+  );
 
   if (!loaded) return <View style={s.root} />;
 

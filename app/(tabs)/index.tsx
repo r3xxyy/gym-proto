@@ -478,7 +478,8 @@ function ExerciseCard({
 
   function addSet() {
     const last = exercise.sets[exercise.sets.length - 1];
-    onChange({ ...exercise, sets: [...exercise.sets, { weight: last.weight, reps: last.reps, rpe: '', drops: [] }] });
+    const newDrops = last.drops.map(d => ({ weight: d.weight, reps: d.reps }));
+    onChange({ ...exercise, sets: [...exercise.sets, { weight: last.weight, reps: last.reps, rpe: '', drops: newDrops }] });
   }
 
   function removeSet(si: number) {
@@ -539,15 +540,6 @@ function ExerciseCard({
                 placeholder="reps"
                 placeholderTextColor="#ccc"
               />
-              <Text style={card.sep}>@</Text>
-              <TextInput
-                style={[card.input, card.rpeInput]}
-                value={set.rpe}
-                onChangeText={v => updateRpe(si, v)}
-                keyboardType="decimal-pad"
-                placeholder="RPE"
-                placeholderTextColor="#ccc"
-              />
               {/* Drop sets */}
               {set.drops.map((drop, di) => (
                 <View key={di} style={card.dropGroup}>
@@ -578,6 +570,16 @@ function ExerciseCard({
               <TouchableOpacity style={card.dropBtn} onPress={() => addDrop(si)}>
                 <Text style={card.dropBtnText}>+ Drop</Text>
               </TouchableOpacity>
+              {/* RPE — one field for the whole set */}
+              <Text style={card.sep}>@</Text>
+              <TextInput
+                style={[card.input, card.rpeInput]}
+                value={set.rpe}
+                onChangeText={v => updateRpe(si, v)}
+                keyboardType="decimal-pad"
+                placeholder="RPE"
+                placeholderTextColor="#ccc"
+              />
             </View>
           </ScrollView>
           {/* Confirm set */}
@@ -1020,7 +1022,8 @@ export default function HomeScreen() {
   const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history'>('home');
   const [seconds, setSeconds] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [restSeconds, setRestSeconds] = useState(0);
+  const [restSeconds, setRestSeconds] = useState(0);       // total rest (for history)
+  const [currentRestSecs, setCurrentRestSecs] = useState(0); // per-set rest display
   const [finalSeconds, setFinalSeconds] = useState(0);
   const [finalRest, setFinalRest] = useState(0);
   const [bodyweight, setBodyweight] = useState('');
@@ -1043,6 +1046,10 @@ export default function HomeScreen() {
 
   const workoutInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const restInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeStartRef = useRef<number>(0);   // timestamp when current active period began
+  const activeAccRef = useRef<number>(0);     // accumulated active seconds before current period
+  const restStartRef = useRef<number>(0);     // timestamp when current rest period began
+  const restAccRef = useRef<number>(0);       // accumulated rest seconds before current period
   const todayWorkout = getTodayWorkout();
 
   function startWorkout() {
@@ -1051,21 +1058,59 @@ export default function HomeScreen() {
     setSeconds(0);
     setRestSeconds(0);
     setPaused(false);
+    activeAccRef.current = 0;
+    activeStartRef.current = Date.now();
+    restAccRef.current = 0;
     setExercises(plan.map(e => ({ ...e, sets: [{ weight: '', reps: '', rpe: '', drops: [] }] })));
     setScreen('active');
-    workoutInterval.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    workoutInterval.current = setInterval(() => {
+      setSeconds(activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000));
+    }, 1000);
   }
 
   function toggleRest() {
     if (!paused) {
+      // Manual rest button — pause workout, start rest from 0
+      activeAccRef.current += Math.round((Date.now() - activeStartRef.current) / 1000);
       if (workoutInterval.current) clearInterval(workoutInterval.current);
-      restInterval.current = setInterval(() => setRestSeconds(r => r + 1), 1000);
+      setCurrentRestSecs(0);
+      restStartRef.current = Date.now();
+      restInterval.current = setInterval(() => {
+        const cur = Math.round((Date.now() - restStartRef.current) / 1000);
+        setCurrentRestSecs(cur);
+        setRestSeconds(restAccRef.current + cur);
+      }, 1000);
       setPaused(true);
     } else {
+      // Continue — end rest, resume workout
+      restAccRef.current += Math.round((Date.now() - restStartRef.current) / 1000);
       if (restInterval.current) clearInterval(restInterval.current);
-      workoutInterval.current = setInterval(() => setSeconds(s => s + 1), 1000);
+      setCurrentRestSecs(0);
+      activeStartRef.current = Date.now();
+      workoutInterval.current = setInterval(() => {
+        setSeconds(activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000));
+      }, 1000);
       setPaused(false);
     }
+  }
+
+  function startFreshRest() {
+    // Called on each ✓ — accumulates current rest and restarts from 0
+    if (paused) {
+      restAccRef.current += Math.round((Date.now() - restStartRef.current) / 1000);
+      if (restInterval.current) clearInterval(restInterval.current);
+    } else {
+      activeAccRef.current += Math.round((Date.now() - activeStartRef.current) / 1000);
+      if (workoutInterval.current) clearInterval(workoutInterval.current);
+      setPaused(true);
+    }
+    setCurrentRestSecs(0);
+    restStartRef.current = Date.now();
+    restInterval.current = setInterval(() => {
+      const cur = Math.round((Date.now() - restStartRef.current) / 1000);
+      setCurrentRestSecs(cur);
+      setRestSeconds(restAccRef.current + cur);
+    }, 1000);
   }
 
   function reorderExercise(from: number, to: number) {
@@ -1078,14 +1123,22 @@ export default function HomeScreen() {
   }
 
   function endWorkout() {
+    // Compute final times from refs to avoid stale state
+    const finalActive = paused
+      ? activeAccRef.current
+      : activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000);
+    const finalRest_ = paused
+      ? restAccRef.current + Math.round((Date.now() - restStartRef.current) / 1000)
+      : restAccRef.current;
+
     if (workoutInterval.current) clearInterval(workoutInterval.current);
     if (restInterval.current) clearInterval(restInterval.current);
     const entry: HistoryEntry = {
       id: Date.now().toString(),
       date: new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
       workoutName: todayWorkout,
-      duration: seconds,
-      restTime: restSeconds,
+      duration: finalActive,
+      restTime: finalRest_,
       exercises: exercises,
     };
     setHistory(prev => {
@@ -1093,15 +1146,18 @@ export default function HomeScreen() {
       FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
       return updated;
     });
-    setFinalSeconds(seconds);
-    setFinalRest(restSeconds);
+    setFinalSeconds(finalActive);
+    setFinalRest(finalRest_);
     setScreen('summary');
   }
 
   function reset() {
     setSeconds(0);
     setRestSeconds(0);
+    setCurrentRestSecs(0);
     setPaused(false);
+    activeAccRef.current = 0;
+    restAccRef.current = 0;
     setScreen('home');
   }
 
@@ -1280,8 +1336,8 @@ export default function HomeScreen() {
         <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
           <View style={styles.timerBar}>
             <Text style={styles.timerBarTime}>{formatTime(seconds)}</Text>
-            {restSeconds > 0 && (
-              <Text style={styles.timerBarRest}>Rest {formatTime(restSeconds)}</Text>
+            {paused && (
+              <Text style={styles.timerBarRest}>Rest {formatTime(currentRestSecs)}</Text>
             )}
             <TouchableOpacity style={styles.restBtn} onPress={toggleRest}>
               <Text style={styles.restBtnText}>{paused ? 'Continue' : 'Rest'}</Text>
@@ -1300,7 +1356,7 @@ export default function HomeScreen() {
                 }
                 onSwap={() => setActiveSwapId(ex.id)}
                 onReorder={reorderExercise}
-                onConfirmSet={() => { if (!paused) toggleRest(); }}
+                onConfirmSet={() => startFreshRest()}
               />
             ))}
             <TouchableOpacity style={styles.endBtn} onPress={endWorkout}>
@@ -1375,7 +1431,9 @@ export default function HomeScreen() {
                 total + ex.sets.reduce((s, set) => {
                   const w = parseFloat(set.weight) || 0;
                   const r = parseInt(set.reps) || 0;
-                  return s + w * r;
+                  const dropVol = set.drops.reduce((dv, d) =>
+                    dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
+                  return s + w * r + dropVol;
                 }, 0), 0).toLocaleString()} kg
             </Text>
 
