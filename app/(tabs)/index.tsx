@@ -454,7 +454,6 @@ function ExerciseCard({
   onConfirmSet?: () => void;
 }) {
   const [confirmedSets, setConfirmedSets] = useState<Set<number>>(new Set());
-  const [editing, setEditing] = useState(false);
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, [field]: value } : s);
     const now = Date.now();
@@ -505,52 +504,18 @@ function ExerciseCard({
   return (
     <View style={card.container}>
       <View style={card.header}>
-        {onSwap && !editing ? (
+        {onSwap ? (
           <TouchableOpacity onPress={onSwap} style={{ flex: 1 }}>
             <Text style={[card.name, { color: '#007AFF' }]}>{exercise.name}</Text>
             <Text style={card.swapHint}>tap to swap</Text>
           </TouchableOpacity>
-        ) : editing ? (
-          <TextInput
-            style={[card.name, card.editInput, { flex: 1 }]}
-            value={exercise.name}
-            onChangeText={v => onChange({ ...exercise, name: v })}
-            placeholder="Exercise name"
-            placeholderTextColor="#ccc"
-          />
         ) : (
           <Text style={card.name}>{exercise.name}</Text>
         )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TouchableOpacity onPress={() => setEditing(v => !v)}>
-            <Text style={card.editToggle}>{editing ? 'done' : 'edit'}</Text>
-          </TouchableOpacity>
-          <Text style={card.badge}>{exercise.type}</Text>
-        </View>
+        <Text style={card.badge}>{exercise.type}</Text>
       </View>
-      {editing ? (
-        <>
-          <TextInput
-            style={[card.muscles, card.editInput]}
-            value={exercise.muscles}
-            onChangeText={v => onChange({ ...exercise, muscles: v })}
-            placeholder="Muscles"
-            placeholderTextColor="#ccc"
-          />
-          <TextInput
-            style={[card.target, card.editInput]}
-            value={exercise.target}
-            onChangeText={v => onChange({ ...exercise, target: v })}
-            placeholder="Target"
-            placeholderTextColor="#ccc"
-          />
-        </>
-      ) : (
-        <>
-          <Text style={card.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
-          <Text style={card.target}>Target: {exercise.target}</Text>
-        </>
-      )}
+      <Text style={card.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
+      <Text style={card.target}>Target: {exercise.target}</Text>
 
       {exercise.sets.map((set, si) => (
         <View key={si} style={card.setRow}>
@@ -638,18 +603,7 @@ function ExerciseCard({
         <Text style={card.addSetText}>+ Add Set</Text>
       </TouchableOpacity>
 
-      {editing ? (
-        <TextInput
-          style={[card.cue, card.editInput]}
-          value={exercise.cue}
-          onChangeText={v => onChange({ ...exercise, cue: v })}
-          placeholder="Cue"
-          placeholderTextColor="#ccc"
-          multiline
-        />
-      ) : (
-        <Text style={card.cue}>{exercise.cue}</Text>
-      )}
+      <Text style={card.cue}>{exercise.cue}</Text>
     </View>
   );
 }
@@ -662,6 +616,7 @@ function DraggableCard({
   total,
   onChange,
   onSwap,
+  onRemove,
   onReorder,
   onConfirmSet,
 }: {
@@ -670,6 +625,7 @@ function DraggableCard({
   total: number;
   onChange: (updated: Exercise) => void;
   onSwap: () => void;
+  onRemove: () => void;
   onReorder: (from: number, to: number) => void;
   onConfirmSet?: () => void;
 }) {
@@ -710,6 +666,9 @@ function DraggableCard({
         <View style={drag.handle}>
           <Text style={drag.handleDots}>⠿ ⠿ ⠿</Text>
           <Text style={drag.handleLabel}>hold to drag</Text>
+          <TouchableOpacity onPress={onRemove} style={drag.removeBtn}>
+            <Text style={drag.removeBtnText}>✕</Text>
+          </TouchableOpacity>
         </View>
         <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onConfirmSet={onConfirmSet} />
       </Animated.View>
@@ -1079,8 +1038,8 @@ export default function HomeScreen() {
     const d = new Date().getDay();
     return d >= 1 && d <= 5 ? d : 1;
   });
-  const [swapContext, setSwapContext] = useState<{ day: number; exerciseId: string } | null>(null);
-  const [activeSwapId, setActiveSwapId] = useState<string | null>(null);
+  const [swapContext, setSwapContext] = useState<{ day: number; exerciseId: string | null } | null>(null);
+  const [activeSwapId, setActiveSwapId] = useState<string | null>(null); // '__add__' = add mode
   const [swapQuery, setSwapQuery] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const completedDays = [...new Set(history.map(h => WORKOUT_TO_DAY[h.workoutName]).filter(Boolean))];
@@ -1290,29 +1249,49 @@ export default function HomeScreen() {
                   {isExpanded && (
                     <View style={poster.cardList}>
                       {displayExercises.map(ex => (
-                        <TouchableOpacity
-                          key={ex.id}
-                          style={[poster.darkCard, { borderLeftColor: color + '66' }]}
-                          onPress={() => !isDone && setSwapContext({ day, exerciseId: ex.id })}
-                          activeOpacity={isDone ? 1 : 0.7}
-                        >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={poster.cardName}>{ex.name}</Text>
-                            <Text style={poster.cardBadge}>{ex.type}</Text>
-                          </View>
-                          <Text style={poster.cardMuscles}>{ex.muscles}</Text>
-                          {isDone && ex.sets ? (
-                            <Text style={poster.cardSets}>
-                              {ex.sets.map(s => `${s.weight}kg × ${s.reps}`).join('  ·  ')}
-                            </Text>
-                          ) : (
-                            <>
-                              <Text style={poster.cardTarget}>{ex.target}</Text>
-                              <Text style={poster.cardCue}>{ex.cue}</Text>
-                            </>
+                        <View key={ex.id} style={{ position: 'relative' }}>
+                          <TouchableOpacity
+                            style={[poster.darkCard, { borderLeftColor: color + '66' }]}
+                            onPress={() => !isDone && setSwapContext({ day, exerciseId: ex.id })}
+                            activeOpacity={isDone ? 1 : 0.7}
+                          >
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={poster.cardName}>{ex.name}</Text>
+                              <Text style={poster.cardBadge}>{ex.type}</Text>
+                            </View>
+                            <Text style={poster.cardMuscles}>{ex.muscles}</Text>
+                            {isDone && ex.sets ? (
+                              <Text style={poster.cardSets}>
+                                {ex.sets.map(s => `${s.weight}kg × ${s.reps}`).join('  ·  ')}
+                              </Text>
+                            ) : (
+                              <>
+                                <Text style={poster.cardTarget}>{ex.target}</Text>
+                                <Text style={poster.cardCue}>{ex.cue}</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                          {!isDone && (
+                            <TouchableOpacity
+                              style={poster.cardRemove}
+                              onPress={() => setWeekPlan(prev => ({
+                                ...prev,
+                                [day]: (prev[day] ?? []).filter(e => e.id !== ex.id),
+                              }))}
+                            >
+                              <Text style={poster.cardRemoveText}>✕</Text>
+                            </TouchableOpacity>
                           )}
-                        </TouchableOpacity>
+                        </View>
                       ))}
+                      {!isDone && (
+                        <TouchableOpacity
+                          style={poster.addExBtn}
+                          onPress={() => setSwapContext({ day, exerciseId: null })}
+                        >
+                          <Text style={poster.addExBtnText}>+ ADD EXERCISE</Text>
+                        </TouchableOpacity>
+                      )}
                       {isDone && historyEntry && (
                         <TouchableOpacity
                           style={poster.coachBtn}
@@ -1342,7 +1321,7 @@ export default function HomeScreen() {
             <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
-                  <Text style={poster.swapTitle}>SWAP EXERCISE</Text>
+                  <Text style={poster.swapTitle}>{swapContext.exerciseId === null ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
                   <TextInput
                     style={poster.swapSearch}
                     value={swapQuery}
@@ -1352,16 +1331,16 @@ export default function HomeScreen() {
                     autoCorrect={false}
                   />
                   <ScrollView style={{ maxHeight: 280 }}>
-                    {swapQuery.trim() !== '' && !getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? []).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
+                    {swapQuery.trim() !== '' && !getSwapOptions(swapContext.exerciseId ?? '', weekPlan[swapContext.day] ?? []).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
                       <TouchableOpacity
                         style={poster.swapOption}
                         onPress={() => {
                           const customEx: Omit<Exercise, 'sets'> = { id: `custom_${Date.now()}`, name: swapQuery.trim(), muscles: '', type: 'Iso', target: '', cue: '' };
                           setWeekPlan(prev => ({
                             ...prev,
-                            [swapContext.day]: (prev[swapContext.day] ?? []).map(e =>
-                              e.id === swapContext.exerciseId ? customEx : e
-                            ),
+                            [swapContext.day]: swapContext.exerciseId === null
+                              ? [...(prev[swapContext.day] ?? []), customEx]
+                              : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? customEx : e),
                           }));
                           setSwapContext(null);
                           setSwapQuery('');
@@ -1371,7 +1350,7 @@ export default function HomeScreen() {
                         <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
                     )}
-                    {getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? [])
+                    {getSwapOptions(swapContext.exerciseId ?? '', weekPlan[swapContext.day] ?? [])
                       .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
                       .map(opt => (
                         <TouchableOpacity
@@ -1380,9 +1359,9 @@ export default function HomeScreen() {
                           onPress={() => {
                             setWeekPlan(prev => ({
                               ...prev,
-                              [swapContext.day]: (prev[swapContext.day] ?? []).map(e =>
-                                e.id === swapContext.exerciseId ? opt : e
-                              ),
+                              [swapContext.day]: swapContext.exerciseId === null
+                                ? [...(prev[swapContext.day] ?? []), opt]
+                                : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? opt : e),
                             }));
                             setSwapContext(null);
                             setSwapQuery('');
@@ -1436,16 +1415,20 @@ export default function HomeScreen() {
                   setExercises(prev => prev.map(e => (e.id === updated.id ? updated : e)))
                 }
                 onSwap={() => setActiveSwapId(ex.id)}
+                onRemove={() => setExercises(prev => prev.filter(e => e.id !== ex.id))}
                 onReorder={reorderExercise}
                 onConfirmSet={() => startFreshRest()}
               />
             ))}
+            <TouchableOpacity style={styles.addExBtn} onPress={() => setActiveSwapId('__add__')}>
+              <Text style={styles.addExBtnText}>+ Add Exercise</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.endBtn} onPress={endWorkout}>
               <Text style={styles.endBtnText}>End Workout</Text>
             </TouchableOpacity>
           </ScrollView>
 
-          {/* ── Active Swap Modal ── */}
+          {/* ── Active Swap / Add Modal ── */}
           {activeSwapId !== null && (
             <TouchableOpacity
               style={swap.overlay}
@@ -1454,7 +1437,7 @@ export default function HomeScreen() {
             >
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
-                  <Text style={poster.swapTitle}>SWAP EXERCISE</Text>
+                  <Text style={poster.swapTitle}>{activeSwapId === '__add__' ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
                   <TextInput
                     style={poster.swapSearch}
                     value={swapQuery}
@@ -1464,17 +1447,16 @@ export default function HomeScreen() {
                     autoCorrect={false}
                   />
                   <ScrollView style={{ maxHeight: 280 }}>
-                    {swapQuery.trim() !== '' && !getSwapOptions(activeSwapId, exercises).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
+                    {swapQuery.trim() !== '' && !getSwapOptions(activeSwapId === '__add__' ? '' : activeSwapId, exercises).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
                       <TouchableOpacity
                         style={poster.swapOption}
                         onPress={() => {
-                          setExercises(prev =>
-                            prev.map(e =>
-                              e.id === activeSwapId
-                                ? { ...e, name: swapQuery.trim(), id: `custom_${Date.now()}` }
-                                : e
-                            )
-                          );
+                          const customEx: Exercise = { id: `custom_${Date.now()}`, name: swapQuery.trim(), muscles: '', type: 'Iso', target: '', cue: '', sets: [{ weight: '', reps: '', rpe: '', drops: [] }] };
+                          if (activeSwapId === '__add__') {
+                            setExercises(prev => [...prev, customEx]);
+                          } else {
+                            setExercises(prev => prev.map(e => e.id === activeSwapId ? { ...customEx, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
+                          }
                           setActiveSwapId(null);
                           setSwapQuery('');
                         }}
@@ -1483,20 +1465,18 @@ export default function HomeScreen() {
                         <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
                     )}
-                    {getSwapOptions(activeSwapId, exercises)
+                    {getSwapOptions(activeSwapId === '__add__' ? '' : activeSwapId, exercises)
                       .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
                       .map(opt => (
                         <TouchableOpacity
                           key={opt.id}
                           style={poster.swapOption}
                           onPress={() => {
-                            setExercises(prev =>
-                              prev.map(e =>
-                                e.id === activeSwapId
-                                  ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt }
-                                  : e
-                              )
-                            );
+                            if (activeSwapId === '__add__') {
+                              setExercises(prev => [...prev, { ...opt, sets: [{ weight: '', reps: '', rpe: '', drops: [] }] }]);
+                            } else {
+                              setExercises(prev => prev.map(e => e.id === activeSwapId ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
+                            }
                             setActiveSwapId(null);
                             setSwapQuery('');
                           }}
@@ -1638,6 +1618,8 @@ const styles = StyleSheet.create({
   restBtnText: { fontSize: 14, fontWeight: '600' },
   endBtn: { borderWidth: 1, borderColor: '#ccc', paddingVertical: 12, borderRadius: 8, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
   endBtnText: { fontSize: 15, color: '#999', textAlign: 'center' },
+  addExBtn: { borderWidth: 1, borderColor: '#ddd', paddingVertical: 12, borderRadius: 8, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
+  addExBtnText: { fontSize: 14, color: '#007AFF' },
   list: { padding: 16, paddingBottom: 32 },
   summaryLabel: { fontSize: 13, color: '#999', textTransform: 'uppercase', letterSpacing: 1 },
   summaryValue: { fontSize: 36, fontWeight: '300', letterSpacing: 3, marginBottom: 8 },
@@ -1712,6 +1694,10 @@ const poster = StyleSheet.create({
   footer: { padding: 16, paddingBottom: 32, backgroundColor: '#080810', borderTopWidth: 1, borderTopColor: '#0f0f18' },
   startBtn: { paddingVertical: 18, alignItems: 'center', borderWidth: 1, borderColor: '#222' },
   startBtnText: { color: '#fff', fontSize: 11, letterSpacing: 7, fontWeight: '600' },
+  cardRemove: { position: 'absolute', top: 8, right: 8, padding: 6 },
+  cardRemoveText: { fontSize: 11, color: '#333' },
+  addExBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center' },
+  addExBtnText: { fontSize: 10, letterSpacing: 5, color: 'rgba(255,255,255,0.35)', fontWeight: '600' },
 });
 
 const week = StyleSheet.create({
@@ -1777,14 +1763,14 @@ const card = StyleSheet.create({
   cue: { fontSize: 12, color: '#aaa', marginTop: 8, fontStyle: 'italic' },
   exTime: { fontSize: 12, color: '#888', marginTop: 6 },
   swapHint: { fontSize: 10, color: '#007AFF', opacity: 0.6, marginTop: 1, letterSpacing: 0.5 },
-  editInput: { borderBottomWidth: 1, borderBottomColor: '#ddd', borderRadius: 0, paddingVertical: 2 },
-  editToggle: { fontSize: 11, color: '#007AFF', letterSpacing: 0.5 },
 });
 
 const drag = StyleSheet.create({
   handle: { backgroundColor: '#fff', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: -12 },
   handleDots: { fontSize: 13, color: '#ccc', letterSpacing: 2 },
   handleLabel: { fontSize: 10, color: '#ccc', letterSpacing: 1.5, textTransform: 'uppercase' },
+  removeBtn: { position: 'absolute', right: 12, padding: 4 },
+  removeBtnText: { fontSize: 13, color: '#ccc' },
 });
 
 const diag = StyleSheet.create({

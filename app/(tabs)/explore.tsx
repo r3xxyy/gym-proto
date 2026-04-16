@@ -57,10 +57,8 @@ const MUSCLE_GROUPS: Record<string, string> = {
 const HISTORY_PATH = FileSystem.documentDirectory + 'history.json';
 
 function getMuscleGroups(muscles: string): string[] {
-  const parts = muscles.split(',').map(s => s.trim().toLowerCase());
-  const result = new Set<string>();
-  parts.forEach(p => { if (MUSCLE_GROUPS[p]) result.add(MUSCLE_GROUPS[p]); });
-  return [...result];
+  const primary = muscles.split(',')[0].trim().toLowerCase();
+  return MUSCLE_GROUPS[primary] ? [MUSCLE_GROUPS[primary]] : [];
 }
 
 // ─── MEV / MRV lookup (sets per week, from RP research) ──────────────────────
