@@ -454,6 +454,7 @@ function ExerciseCard({
   onConfirmSet?: () => void;
 }) {
   const [confirmedSets, setConfirmedSets] = useState<Set<number>>(new Set());
+  const [editing, setEditing] = useState(false);
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, [field]: value } : s);
     const now = Date.now();
@@ -504,18 +505,52 @@ function ExerciseCard({
   return (
     <View style={card.container}>
       <View style={card.header}>
-        {onSwap ? (
+        {onSwap && !editing ? (
           <TouchableOpacity onPress={onSwap} style={{ flex: 1 }}>
             <Text style={[card.name, { color: '#007AFF' }]}>{exercise.name}</Text>
             <Text style={card.swapHint}>tap to swap</Text>
           </TouchableOpacity>
+        ) : editing ? (
+          <TextInput
+            style={[card.name, card.editInput, { flex: 1 }]}
+            value={exercise.name}
+            onChangeText={v => onChange({ ...exercise, name: v })}
+            placeholder="Exercise name"
+            placeholderTextColor="#ccc"
+          />
         ) : (
           <Text style={card.name}>{exercise.name}</Text>
         )}
-        <Text style={card.badge}>{exercise.type}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity onPress={() => setEditing(v => !v)}>
+            <Text style={card.editToggle}>{editing ? 'done' : 'edit'}</Text>
+          </TouchableOpacity>
+          <Text style={card.badge}>{exercise.type}</Text>
+        </View>
       </View>
-      <Text style={card.muscles}>{exercise.muscles}</Text>
-      <Text style={card.target}>Target: {exercise.target}</Text>
+      {editing ? (
+        <>
+          <TextInput
+            style={[card.muscles, card.editInput]}
+            value={exercise.muscles}
+            onChangeText={v => onChange({ ...exercise, muscles: v })}
+            placeholder="Muscles"
+            placeholderTextColor="#ccc"
+          />
+          <TextInput
+            style={[card.target, card.editInput]}
+            value={exercise.target}
+            onChangeText={v => onChange({ ...exercise, target: v })}
+            placeholder="Target"
+            placeholderTextColor="#ccc"
+          />
+        </>
+      ) : (
+        <>
+          <Text style={card.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
+          <Text style={card.target}>Target: {exercise.target}</Text>
+        </>
+      )}
 
       {exercise.sets.map((set, si) => (
         <View key={si} style={card.setRow}>
@@ -603,7 +638,18 @@ function ExerciseCard({
         <Text style={card.addSetText}>+ Add Set</Text>
       </TouchableOpacity>
 
-      <Text style={card.cue}>{exercise.cue}</Text>
+      {editing ? (
+        <TextInput
+          style={[card.cue, card.editInput]}
+          value={exercise.cue}
+          onChangeText={v => onChange({ ...exercise, cue: v })}
+          placeholder="Cue"
+          placeholderTextColor="#ccc"
+          multiline
+        />
+      ) : (
+        <Text style={card.cue}>{exercise.cue}</Text>
+      )}
     </View>
   );
 }
@@ -769,14 +815,7 @@ type HistoryEntry = {
 };
 
 function getSwapOptions(exerciseId: string, current: Omit<Exercise, 'sets'>[]): Omit<Exercise, 'sets'>[] {
-  const ex = current.find(e => e.id === exerciseId);
-  if (!ex) return [];
-  const primaryMuscle = ex.muscles.split(',')[0].trim().toLowerCase();
-  return SWAP_POOL.filter(s => {
-    if (s.id === exerciseId || current.some(e => e.id === s.id)) return false;
-    const sPrimary = s.muscles.split(',')[0].trim().toLowerCase();
-    return sPrimary === primaryMuscle;
-  });
+  return SWAP_POOL.filter(s => s.id !== exerciseId && !current.some(e => e.id === s.id && e.id !== exerciseId));
 }
 
 const WEEK_DAYS = [1, 2, 3, 4, 5];
@@ -1021,6 +1060,7 @@ function AnimatedPosterName({ day, isActive, style }: { day: number; isActive: b
 export default function HomeScreen() {
   const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history'>('home');
   const [seconds, setSeconds] = useState(0);
+  const [totalSessionSecs, setTotalSessionSecs] = useState(0); // cumulative from start, never pauses
   const [paused, setPaused] = useState(false);
   const [restSeconds, setRestSeconds] = useState(0);       // total rest (for history)
   const [currentRestSecs, setCurrentRestSecs] = useState(0); // per-set rest display
@@ -1041,11 +1081,14 @@ export default function HomeScreen() {
   });
   const [swapContext, setSwapContext] = useState<{ day: number; exerciseId: string } | null>(null);
   const [activeSwapId, setActiveSwapId] = useState<string | null>(null);
+  const [swapQuery, setSwapQuery] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const completedDays = [...new Set(history.map(h => WORKOUT_TO_DAY[h.workoutName]).filter(Boolean))];
 
   const workoutInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const restInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const totalInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionStartRef = useRef<number>(0);
   const activeStartRef = useRef<number>(0);   // timestamp when current active period began
   const activeAccRef = useRef<number>(0);     // accumulated active seconds before current period
   const restStartRef = useRef<number>(0);     // timestamp when current rest period began
@@ -1056,15 +1099,20 @@ export default function HomeScreen() {
     const todayDay = new Date().getDay();
     const plan = weekPlan[todayDay] ?? [];
     setSeconds(0);
+    setTotalSessionSecs(0);
     setRestSeconds(0);
     setPaused(false);
     activeAccRef.current = 0;
     activeStartRef.current = Date.now();
+    sessionStartRef.current = Date.now();
     restAccRef.current = 0;
     setExercises(plan.map(e => ({ ...e, sets: [{ weight: '', reps: '', rpe: '', drops: [] }] })));
     setScreen('active');
     workoutInterval.current = setInterval(() => {
       setSeconds(activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000));
+    }, 1000);
+    totalInterval.current = setInterval(() => {
+      setTotalSessionSecs(Math.round((Date.now() - sessionStartRef.current) / 1000));
     }, 1000);
   }
 
@@ -1133,6 +1181,7 @@ export default function HomeScreen() {
 
     if (workoutInterval.current) clearInterval(workoutInterval.current);
     if (restInterval.current) clearInterval(restInterval.current);
+    if (totalInterval.current) clearInterval(totalInterval.current);
     const entry: HistoryEntry = {
       id: Date.now().toString(),
       date: new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
@@ -1153,11 +1202,13 @@ export default function HomeScreen() {
 
   function reset() {
     setSeconds(0);
+    setTotalSessionSecs(0);
     setRestSeconds(0);
     setCurrentRestSecs(0);
     setPaused(false);
     activeAccRef.current = 0;
     restAccRef.current = 0;
+    if (totalInterval.current) clearInterval(totalInterval.current);
     setScreen('home');
   }
 
@@ -1165,6 +1216,7 @@ export default function HomeScreen() {
     return () => {
       if (workoutInterval.current) clearInterval(workoutInterval.current);
       if (restInterval.current) clearInterval(restInterval.current);
+      if (totalInterval.current) clearInterval(totalInterval.current);
     };
   }, []);
 
@@ -1287,34 +1339,61 @@ export default function HomeScreen() {
 
           {/* ── Swap Modal ── */}
           {swapContext !== null && (
-            <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => setSwapContext(null)}>
+            <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
                   <Text style={poster.swapTitle}>SWAP EXERCISE</Text>
-                  <ScrollView style={{ maxHeight: 320 }}>
-                    {getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? []).map(opt => (
+                  <TextInput
+                    style={poster.swapSearch}
+                    value={swapQuery}
+                    onChangeText={setSwapQuery}
+                    placeholder="Search or type custom name…"
+                    placeholderTextColor="#444"
+                    autoCorrect={false}
+                  />
+                  <ScrollView style={{ maxHeight: 280 }}>
+                    {swapQuery.trim() !== '' && !getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? []).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
                       <TouchableOpacity
-                        key={opt.id}
                         style={poster.swapOption}
                         onPress={() => {
+                          const customEx: Omit<Exercise, 'sets'> = { id: `custom_${Date.now()}`, name: swapQuery.trim(), muscles: '', type: 'Iso', target: '', cue: '' };
                           setWeekPlan(prev => ({
                             ...prev,
                             [swapContext.day]: (prev[swapContext.day] ?? []).map(e =>
-                              e.id === swapContext.exerciseId ? opt : e
+                              e.id === swapContext.exerciseId ? customEx : e
                             ),
                           }));
                           setSwapContext(null);
+                          setSwapQuery('');
                         }}
                       >
-                        <Text style={poster.swapOptName}>{opt.name}</Text>
-                        <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
+                        <Text style={poster.swapOptName}>"{swapQuery.trim()}"</Text>
+                        <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
-                    ))}
-                    {getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? []).length === 0 && (
-                      <Text style={poster.swapEmpty}>No alternatives found.</Text>
                     )}
+                    {getSwapOptions(swapContext.exerciseId, weekPlan[swapContext.day] ?? [])
+                      .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
+                      .map(opt => (
+                        <TouchableOpacity
+                          key={opt.id}
+                          style={poster.swapOption}
+                          onPress={() => {
+                            setWeekPlan(prev => ({
+                              ...prev,
+                              [swapContext.day]: (prev[swapContext.day] ?? []).map(e =>
+                                e.id === swapContext.exerciseId ? opt : e
+                              ),
+                            }));
+                            setSwapContext(null);
+                            setSwapQuery('');
+                          }}
+                        >
+                          <Text style={poster.swapOptName}>{opt.name}</Text>
+                          <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
+                        </TouchableOpacity>
+                      ))}
                   </ScrollView>
-                  <TouchableOpacity style={poster.swapClose} onPress={() => setSwapContext(null)}>
+                  <TouchableOpacity style={poster.swapClose} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
                     <Text style={poster.swapCloseText}>CLOSE</Text>
                   </TouchableOpacity>
                 </View>
@@ -1335,9 +1414,11 @@ export default function HomeScreen() {
       {screen === 'active' && (
         <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
           <View style={styles.timerBar}>
-            <Text style={styles.timerBarTime}>{formatTime(seconds)}</Text>
-            {paused && (
+            <Text style={styles.timerBarTime}>{formatTime(totalSessionSecs)}</Text>
+            {paused ? (
               <Text style={styles.timerBarRest}>Rest {formatTime(currentRestSecs)}</Text>
+            ) : (
+              <Text style={styles.timerBarRest}>Active {formatTime(seconds)}</Text>
             )}
             <TouchableOpacity style={styles.restBtn} onPress={toggleRest}>
               <Text style={styles.restBtnText}>{paused ? 'Continue' : 'Rest'}</Text>
@@ -1369,38 +1450,65 @@ export default function HomeScreen() {
             <TouchableOpacity
               style={swap.overlay}
               activeOpacity={1}
-              onPress={() => setActiveSwapId(null)}
+              onPress={() => { setActiveSwapId(null); setSwapQuery(''); }}
             >
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
                   <Text style={poster.swapTitle}>SWAP EXERCISE</Text>
-                  <ScrollView style={{ maxHeight: 320 }}>
-                    {getSwapOptions(activeSwapId, exercises).map(opt => (
+                  <TextInput
+                    style={poster.swapSearch}
+                    value={swapQuery}
+                    onChangeText={setSwapQuery}
+                    placeholder="Search or type custom name…"
+                    placeholderTextColor="#444"
+                    autoCorrect={false}
+                  />
+                  <ScrollView style={{ maxHeight: 280 }}>
+                    {swapQuery.trim() !== '' && !getSwapOptions(activeSwapId, exercises).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
                       <TouchableOpacity
-                        key={opt.id}
                         style={poster.swapOption}
                         onPress={() => {
                           setExercises(prev =>
                             prev.map(e =>
                               e.id === activeSwapId
-                                ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt }
+                                ? { ...e, name: swapQuery.trim(), id: `custom_${Date.now()}` }
                                 : e
                             )
                           );
                           setActiveSwapId(null);
+                          setSwapQuery('');
                         }}
                       >
-                        <Text style={poster.swapOptName}>{opt.name}</Text>
-                        <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
+                        <Text style={poster.swapOptName}>"{swapQuery.trim()}"</Text>
+                        <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
-                    ))}
-                    {getSwapOptions(activeSwapId, exercises).length === 0 && (
-                      <Text style={poster.swapEmpty}>No alternatives found.</Text>
                     )}
+                    {getSwapOptions(activeSwapId, exercises)
+                      .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
+                      .map(opt => (
+                        <TouchableOpacity
+                          key={opt.id}
+                          style={poster.swapOption}
+                          onPress={() => {
+                            setExercises(prev =>
+                              prev.map(e =>
+                                e.id === activeSwapId
+                                  ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt }
+                                  : e
+                              )
+                            );
+                            setActiveSwapId(null);
+                            setSwapQuery('');
+                          }}
+                        >
+                          <Text style={poster.swapOptName}>{opt.name}</Text>
+                          <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
+                        </TouchableOpacity>
+                      ))}
                   </ScrollView>
                   <TouchableOpacity
                     style={poster.swapClose}
-                    onPress={() => setActiveSwapId(null)}
+                    onPress={() => { setActiveSwapId(null); setSwapQuery(''); }}
                   >
                     <Text style={poster.swapCloseText}>CLOSE</Text>
                   </TouchableOpacity>
@@ -1593,7 +1701,8 @@ const poster = StyleSheet.create({
   coachBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', alignItems: 'center' },
   coachBtnText: { fontSize: 11, letterSpacing: 5, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
   swapSheet: { backgroundColor: '#0f0f1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, borderTopWidth: 1, borderColor: '#1e1e30' },
-  swapTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 5, color: '#444', marginBottom: 16 },
+  swapTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 5, color: '#444', marginBottom: 12 },
+  swapSearch: { backgroundColor: '#16162a', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, fontSize: 14, color: '#ccc', marginBottom: 12 },
   swapOption: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
   swapOptName: { fontSize: 15, fontWeight: '500', color: '#ccc' },
   swapOptMuscles: { fontSize: 11, color: '#333', marginTop: 2, textTransform: 'uppercase', letterSpacing: 1 },
@@ -1668,6 +1777,8 @@ const card = StyleSheet.create({
   cue: { fontSize: 12, color: '#aaa', marginTop: 8, fontStyle: 'italic' },
   exTime: { fontSize: 12, color: '#888', marginTop: 6 },
   swapHint: { fontSize: 10, color: '#007AFF', opacity: 0.6, marginTop: 1, letterSpacing: 0.5 },
+  editInput: { borderBottomWidth: 1, borderBottomColor: '#ddd', borderRadius: 0, paddingVertical: 2 },
+  editToggle: { fontSize: 11, color: '#007AFF', letterSpacing: 0.5 },
 });
 
 const drag = StyleSheet.create({
