@@ -56,6 +56,64 @@ const MUSCLE_GROUPS: Record<string, string> = {
 
 const HISTORY_PATH = FileSystem.documentDirectory + 'history.json';
 
+// Mon 13 Apr 2026 = Week 1; each Mon starts a new week
+const PROGRAM_EPOCH = new Date('2026-04-13').getTime();
+function getCurrentProgramWeek(): number {
+  return Math.max(1, Math.floor((Date.now() - PROGRAM_EPOCH) / (7 * 24 * 60 * 60 * 1000)) + 1);
+}
+function getCurrentWeekBounds(): { start: Date; end: Date } {
+  const week = getCurrentProgramWeek();
+  const start = new Date(PROGRAM_EPOCH + (week - 1) * 7 * 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+function formatTime(totalSeconds: number) {
+  const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const ss = String(totalSeconds % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function formatWeekForCoach(weekEntries: HistoryEntry[]): string {
+  const totalVolume = weekEntries.reduce((total, entry) =>
+    total + entry.exercises.reduce((ev, ex) =>
+      ev + ex.sets.reduce((s, set) => {
+        const w = parseFloat(set.weight) || 0;
+        const r = parseInt(set.reps) || 0;
+        const dropVol = set.drops.reduce((dv, d) =>
+          dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
+        return s + w * r + dropVol;
+      }, 0), 0), 0);
+  const totalActive = weekEntries.reduce((t, e) => t + e.duration, 0);
+  const totalRest = weekEntries.reduce((t, e) => t + e.restTime, 0);
+
+  const lines: string[] = [
+    `WEEK ${getCurrentProgramWeek()} REVIEW`,
+    `SESSIONS: ${weekEntries.length}  |  TOTAL VOLUME: ${totalVolume.toLocaleString()} kg`,
+    `ACTIVE: ${formatTime(totalActive)}  |  REST: ${formatTime(totalRest)}`,
+    '',
+  ];
+  weekEntries.forEach(entry => {
+    const vol = entry.exercises.reduce((ev, ex) =>
+      ev + ex.sets.reduce((s, set) => (s + (parseFloat(set.weight) || 0) * (parseInt(set.reps) || 0)), 0), 0);
+    lines.push(`── ${entry.workoutName} (${entry.date})  |  Vol: ${vol.toLocaleString()} kg  |  Active: ${formatTime(entry.duration)}`);
+    entry.exercises.forEach(ex => {
+      const sets = ex.sets.map(s => `${s.weight}kg×${s.reps}`).join('  ');
+      lines.push(`  ${ex.name}: ${sets}`);
+      if ((ex as any).notes?.trim()) lines.push(`    Note: ${(ex as any).notes.trim()}`);
+    });
+    lines.push('');
+  });
+  lines.push('---');
+  lines.push('Based on this full week of training:');
+  lines.push('1. Key performance trends across all sessions?');
+  lines.push('2. Which muscles were over/under stimulated vs targets?');
+  lines.push('3. Adjustments for next week (volume, intensity, exercise selection)?');
+  lines.push('4. Recovery or programming flags going into next week?');
+  return lines.join('\n');
+}
+
 function getMuscleGroups(muscles: string): string[] {
   const primary = muscles.split(',')[0].trim().toLowerCase();
   return MUSCLE_GROUPS[primary] ? [MUSCLE_GROUPS[primary]] : [];
@@ -209,6 +267,14 @@ export default function StatsScreen() {
 
   const weekLabels = ['This week', 'Last week', '2w ago', '3w ago'];
 
+  const { start: weekStart, end: weekEnd } = getCurrentWeekBounds();
+  const weekEntries = history.filter(entry => {
+    const d = new Date(entry.date).getTime();
+    return d >= weekStart.getTime() && d < weekEnd.getTime();
+  });
+  const SPLIT_NAMES = ['Leg A', 'Push Day', 'Pull Day', 'Boulder Shoulder', 'Leg B'];
+  const weekComplete = SPLIT_NAMES.every(name => weekEntries.some(e => e.workoutName === name));
+
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
       <Text style={s.screenTitle}>Progress</Text>
@@ -275,6 +341,16 @@ export default function StatsScreen() {
       >
         <Text style={s.coachBtnText}>Coach This →</Text>
       </TouchableOpacity>
+
+      {/* ── Coach This Week ── */}
+      {weekComplete && (
+        <TouchableOpacity
+          style={[s.coachBtn, { marginTop: 12, borderColor: '#000' }]}
+          onPress={() => Share.share({ message: formatWeekForCoach(weekEntries) })}
+        >
+          <Text style={[s.coachBtnText, { color: '#000' }]}>Coach This Week →</Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 }

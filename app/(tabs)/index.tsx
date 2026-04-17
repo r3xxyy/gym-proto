@@ -250,13 +250,122 @@ const SWAP_POOL: Omit<Exercise, 'sets'>[] = [
   { id: 'sp_ot1', name: '3D Abductor Machine',                      muscles: 'Glutes',                          type: 'Iso',      target: '', cue: 'Full ROM • controlled return • no momentum' },
 ];
 
-const WORKOUT_EXERCISES: Record<number, Omit<Exercise, 'sets'>[]> = {
+// Week 2 exercises (current arrays above)
+const W2_DAY_EXERCISES: Record<number, Omit<Exercise, 'sets'>[]> = {
   1: LEG_A_EXERCISES,
   2: PUSH_EXERCISES,
   3: PULL_EXERCISES,
   4: SHOULDER_EXERCISES,
   5: LEG_B_EXERCISES,
 };
+
+// Week 1 exercises (re-entry baseline)
+const W1_DAY_EXERCISES: Record<number, Omit<Exercise, 'sets'>[]> = {
+  1: [
+    { id: 'la1', name: 'Hack Squat', muscles: 'Quads, Glutes', type: 'Compound', target: '80 kg × 6–8 × 3', cue: 'Knees forward • full depth • no bounce • constant tension' },
+    { id: 'la2', name: 'DB Romanian Deadlift', muscles: 'Hamstrings, Glutes', type: 'Compound', target: '40 kg × 8 × 3', cue: 'Hips back • deep hamstring stretch • neutral spine • slow eccentric' },
+    { id: 'la3', name: 'Cable Pull-Through', muscles: 'Glutes, Hamstrings', type: 'Compound', target: '50 kg × 10 × 3', cue: 'Hinge at hip not waist • glutes finish • no lower back drive • pause at lockout' },
+    { id: 'la4', name: 'Hip Thrust (Machine)', muscles: 'Glute Maximus', type: 'Compound', target: '80 kg × 8–10 × 3', cue: 'Full lockout • 1–2s squeeze • ribs down • no hyperextension' },
+    { id: 'la5', name: 'Seated Leg Curl', muscles: 'Hamstrings', type: 'Iso', target: '50 kg × 10 × 3', cue: 'Initiate with hamstring not momentum • 3s eccentric • full range both directions' },
+    { id: 'la6', name: 'Seated Calf Raise', muscles: 'Gastrocnemius', type: 'Iso', target: '15 kg × 10–12 × 3', cue: 'Full stretch at bottom • 2s hold • drive through ball of foot • squeeze at top' },
+    { id: 'la7', name: 'Cable Crunch', muscles: 'Abs', type: 'Iso', target: '73 kg × 12 × 3', cue: 'Rope at forehead • curl spine — not a hip hinge • elbows to knees • 1s hold' },
+  ],
+  2: [
+    { id: '1', name: 'Flat DB Bench Press', muscles: 'Mid Chest, Triceps', type: 'Compound', target: '40 kg × 6–8 × 3', cue: 'Retract scapula into bench • drive up and slightly together • elbows max 75° • 2s descent' },
+    { id: '3', name: 'Incline DB Bench Press', muscles: 'Upper Chest, Triceps', type: 'Compound', target: '37.5 kg × 6–8 × 3', cue: '30–45° incline • scapula retraction • feel upper chest stretch • press in arc not straight up' },
+    { id: '5', name: 'Decline Machine Press', muscles: 'Lower Chest, Triceps', type: 'Compound', target: '45 kg × 6–8 × 3', cue: 'Elbows slightly below chest height • squeeze pecs at lockout • slow eccentric' },
+    { id: '7', name: 'Pec Deck Fly', muscles: 'Chest', type: 'Iso', target: '79 kg × 10–12 × 2 + dropset', cue: 'Slight bend in elbow fixed • lead with elbows not hands • squeeze hard at peak • 2s hold' },
+    { id: '2', name: 'Hammer Curl', muscles: 'Brachialis, Biceps', type: 'Iso', target: '20 kg × 4–6 × 3 + dropset', cue: 'Neutral grip • full hang at bottom • curl to shoulder • no swing' },
+    { id: '4', name: 'Incline Supinated Curl', muscles: 'Biceps Long Head', type: 'Iso', target: '20 kg × 4–6 × 3 + dropset', cue: 'Full dead hang • supinate as you curl • don\'t swing at top' },
+    { id: '6', name: 'Preacher Curl', muscles: 'Biceps Short Head', type: 'Iso', target: '38–40 kg × 10–12 × 3', cue: 'Upper arm fixed on pad • full extension at bottom • squeeze hard at peak • 2s hold' },
+  ],
+  3: [
+    { id: 'pu1', name: 'Pull-Ups (Bodyweight)', muscles: 'Lats, Upper Back, Biceps', type: 'Compound', target: 'BW × 6–8 × 3', cue: 'Dead hang start • depress scapula • drive elbows to hips • chin over bar • no kipping' },
+    { id: 'pu2', name: 'Chest-Supported Row', muscles: 'Mid Back, Lats', type: 'Compound', target: '60 kg × 8 × 3', cue: 'Chest pinned to pad • retract scapula first then pull • elbows 45° to torso • squeeze at peak' },
+    { id: 'pu3', name: 'Lat Pulldown', muscles: 'Lats', type: 'Compound', target: '73 kg × 8 × 3', cue: 'Slight lean back • pull to upper chest • drive elbows down and back • full stretch at top' },
+    { id: 'pu4', name: 'Seated Cable Row', muscles: 'Mid Back', type: 'Compound', target: '70 kg × 8–10 × 3', cue: 'Tall spine • hinge slightly forward on eccentric • row to lower chest • 1s pause' },
+    { id: 'pu5', name: 'Rope Tricep Pushdown', muscles: 'Triceps', type: 'Iso', target: '59 kg × 10–12 × 3 + dropset', cue: 'Elbows pinned • split rope at bottom • full lockout • 1s hold' },
+    { id: 'pu6', name: 'Supinated Single-Arm Pushdown', muscles: 'Triceps', type: 'Iso', target: '23 kg × 10–12 × 3 + dropset', cue: 'Palm facing up • elbow fixed • full supination at lockout' },
+    { id: 'pu8', name: 'Cable Curl', muscles: 'Biceps', type: 'Iso', target: '15–17.5 kg × 12–15 × 2', cue: 'Elbows slightly forward • full stretch at bottom • squeeze at top — finisher' },
+    { id: 'pu7', name: 'Cable Crunch', muscles: 'Abs', type: 'Iso', target: '73 kg × 12 × 3', cue: 'Rope at forehead • curl spine not hips • 1s hold at bottom • slow return' },
+  ],
+  4: [
+    { id: 'sh1', name: 'Machine Shoulder Press', muscles: 'Anterior Delt, Triceps', type: 'Compound', target: '50 kg × 8 × 3', cue: 'Handles at shoulder level • press in slight arc • keep tension on delt • control descent' },
+    { id: 'sh3', name: 'Seated DB Lateral Raise', muscles: 'Lateral Delt', type: 'Iso', target: '20 kg × 10–12 × 3', cue: 'Slight forward lean • lead with elbow • raise to shoulder height • 2s hold at top' },
+    { id: 'sh2', name: 'Chest-Supported Rear Delt Row', muscles: 'Rear Delt', type: 'Iso', target: '32.5 kg × 10 × 3', cue: 'Chest on pad • arms at 90° to torso • drive elbows back and out • squeeze rear delt' },
+    { id: 'sh4', name: 'Cable Rear Delt Pull (Bow & Arrow)', muscles: 'Rear Delt', type: 'Iso', target: '32 kg × 10–12 × 2 + dropset', cue: 'Single arm • pull to ear height • elbow leads • rotate shoulder back' },
+    { id: 'sh5', name: 'Standing Side Delt Raise Machine', muscles: 'Lateral Delt', type: 'Iso', target: '37 kg × 8–10 × 3', cue: 'Slight forward lean • lead with elbow • raise to shoulder — don\'t shrug • slow return' },
+    { id: 'sh6', name: 'Tricep Machine Extension', muscles: 'Triceps', type: 'Iso', target: '30–35 kg × 10–12 × 3 + dropset', cue: 'Upper arm fixed • full extension at bottom • 1s hold • slow return' },
+    { id: 'sh7', name: 'Cable Curl', muscles: 'Biceps', type: 'Iso', target: '15–17.5 kg × 12–15 × 1', cue: 'Finisher — full stretch • full squeeze • no momentum. One crisp set' },
+  ],
+  5: [
+    { id: 'lb1', name: 'Leg Press', muscles: 'Quads, Glutes', type: 'Compound', target: '120 kg × 8 × 3', cue: 'Feet hip width mid-platform • full depth • drive through mid-foot — don\'t lock out' },
+    { id: 'lb2', name: 'Bulgarian Split Squat (Smith)', muscles: 'Quads, Glutes', type: 'Compound', target: '45.9 kg × 8 × 3', cue: 'Front foot far forward • shin stays vertical • lower straight down • drive through heel' },
+    { id: 'lb3', name: 'Lying / Seated Leg Curl', muscles: 'Hamstrings', type: 'Iso', target: '68 kg × 8–10 × 3', cue: '3s eccentric • full range both directions • don\'t let hips rise off pad' },
+    { id: 'lb5', name: 'Leg Extension', muscles: 'Quads', type: 'Iso', target: '84 kg × 8–10 × 3', cue: 'Sit tall • full extension at top — 1s pause • slow 3s descent' },
+    { id: 'lb6', name: 'Seated Calf Raise', muscles: 'Calves', type: 'Iso', target: '15 kg × 12–15 × 3', cue: 'Full stretch at bottom — 2s hold • drive through ball of foot • squeeze at top' },
+    { id: 'lb7', name: 'Cable Crunch', muscles: 'Abs', type: 'Iso', target: '73 kg × 12 × 3', cue: 'Spine curls not hips hinge • 1s hold at bottom' },
+  ],
+};
+
+// ─── Week computation ─────────────────────────────────────────────────────────
+
+// Mon 13 Apr 2026 = Week 1 start
+const PROGRAM_EPOCH = new Date('2026-04-13').getTime();
+
+function getCurrentProgramWeek(): number {
+  return Math.max(1, Math.floor((Date.now() - PROGRAM_EPOCH) / (7 * 24 * 60 * 60 * 1000)) + 1);
+}
+
+function getWeekExercises(week: number): Record<number, Omit<Exercise, 'sets'>[]> {
+  if (week <= 1) return W1_DAY_EXERCISES;
+  return W2_DAY_EXERCISES; // W3+ will extend here
+}
+
+// ─── Progressive overload color ───────────────────────────────────────────────
+
+function getProgressColor(exName: string, targetStr: string, history: HistoryEntry[]): string | undefined {
+  const match = targetStr.match(/^(\d+\.?\d*)\s*kg/);
+  if (!match) return undefined;
+  const targetWeight = parseFloat(match[1]);
+
+  let prevWeight: number | null = null;
+  for (const entry of history) {
+    for (const ex of entry.exercises) {
+      if (ex.name === exName) {
+        for (const s of ex.sets) {
+          const w = parseFloat(s.weight);
+          if (!isNaN(w) && w > 0) {
+            prevWeight = prevWeight === null ? w : Math.max(prevWeight, w);
+          }
+        }
+      }
+    }
+  }
+
+  if (prevWeight === null) return undefined;
+  if (targetWeight > prevWeight) return '#34C759';
+  if (targetWeight < prevWeight) return '#FF3B30';
+  return undefined; // same — default colour
+}
+
+function getSetProgressColor(currentWeight: string, prevWeight: string | undefined): string | undefined {
+  const cur = parseFloat(currentWeight);
+  const prev = parseFloat(prevWeight ?? '');
+  if (!cur || !prev) return undefined;
+  if (cur > prev) return '#34C759';
+  if (cur < prev) return '#FF3B30';
+  return undefined; // same
+}
+
+function getPrevSets(exName: string, workoutName: string, history: HistoryEntry[]): { weight: string; reps: string }[] {
+  const prev = [...history].reverse().find(h => h.workoutName === workoutName);
+  if (!prev) return [];
+  const prevEx = prev.exercises.find(e => e.name === exName);
+  return prevEx?.sets.map(s => ({ weight: s.weight, reps: s.reps })) ?? [];
+}
+
+const WORKOUT_EXERCISES = W2_DAY_EXERCISES; // kept for initExercises()
 
 const SPLIT: Record<number, string> = {
   1: 'Leg A',
@@ -451,11 +560,13 @@ function ExerciseCard({
   onChange,
   onSwap,
   onConfirmSet,
+  prevSets,
 }: {
   exercise: Exercise;
   onChange: (updated: Exercise) => void;
   onSwap?: () => void;
   onConfirmSet?: () => void;
+  prevSets?: { weight: string; reps: string }[];
 }) {
   const [confirmedSets, setConfirmedSets] = useState<Set<number>>(new Set());
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
@@ -518,11 +629,17 @@ function ExerciseCard({
         <Text style={card.badge}>{exercise.type}</Text>
       </View>
       <Text style={card.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
-      <Text style={card.target}>Target: {exercise.target}</Text>
+      {(() => {
+        const prevMax = prevSets ? Math.max(...prevSets.map(s => parseFloat(s.weight) || 0)) : 0;
+        const targetMatch = exercise.target.match(/^(\d+\.?\d*)\s*kg/);
+        const targetW = targetMatch ? parseFloat(targetMatch[1]) : 0;
+        const targetColor = prevMax && targetW ? (targetW > prevMax ? '#34C759' : targetW < prevMax ? '#FF3B30' : undefined) : undefined;
+        return <Text style={[card.target, targetColor ? { color: targetColor } : undefined]}>Target: {exercise.target}</Text>;
+      })()}
 
       {exercise.sets.map((set, si) => (
         <View key={si} style={card.setRow}>
-          <Text style={card.setNum}>{si + 1}</Text>
+          <Text style={[card.setNum, { color: getSetProgressColor(set.weight, prevSets?.[si]?.weight) ?? '#999' }]}>{si + 1}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
             <View style={card.setInner}>
               {/* Main set */}
@@ -632,6 +749,7 @@ function DraggableCard({
   onRemove,
   onReorder,
   onConfirmSet,
+  prevSets,
 }: {
   exercise: Exercise;
   index: number;
@@ -641,6 +759,7 @@ function DraggableCard({
   onRemove: () => void;
   onReorder: (from: number, to: number) => void;
   onConfirmSet?: () => void;
+  prevSets?: { weight: string; reps: string }[];
 }) {
   const translateY = useSharedValue(0);
   const dragging = useSharedValue(false);
@@ -683,7 +802,7 @@ function DraggableCard({
             <Text style={drag.removeBtnText}>✕</Text>
           </TouchableOpacity>
         </View>
-        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onConfirmSet={onConfirmSet} />
+        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onConfirmSet={onConfirmSet} prevSets={prevSets} />
       </Animated.View>
     </GestureDetector>
   );
@@ -1114,12 +1233,10 @@ export default function HomeScreen() {
   const [finalRest, setFinalRest] = useState(0);
   const [bodyweight, setBodyweight] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [weekPlan, setWeekPlan] = useState<Record<number, Omit<Exercise, 'sets'>[]>>({
-    1: [...LEG_A_EXERCISES],
-    2: [...PUSH_EXERCISES],
-    3: [...PULL_EXERCISES],
-    4: [...SHOULDER_EXERCISES],
-    5: [...LEG_B_EXERCISES],
+  const currentWeek = getCurrentProgramWeek();
+  const [weekPlan, setWeekPlan] = useState<Record<number, Omit<Exercise, 'sets'>[]>>(() => {
+    const exs = getWeekExercises(currentWeek);
+    return { 1: [...exs[1]], 2: [...exs[2]], 3: [...exs[3]], 4: [...exs[4]], 5: [...exs[5]] };
   });
   const [expandedDay, setExpandedDay] = useState<number | null>(() => {
     const d = new Date().getDay();
@@ -1295,7 +1412,7 @@ export default function HomeScreen() {
           <View style={poster.header}>
             <View>
               <Text style={poster.brand}>GYM PROTO</Text>
-              <Text style={poster.phase}>WEEK 1  LINE UP</Text>
+              <Text style={poster.phase}>WEEK {currentWeek}  LINE UP</Text>
             </View>
             <TouchableOpacity style={poster.histBtn} onPress={() => setScreen('history')}>
               <Text style={poster.histBtnText}>HISTORY</Text>
@@ -1335,42 +1452,45 @@ export default function HomeScreen() {
 
                   {isExpanded && (
                     <View style={poster.cardList}>
-                      {displayExercises.map(ex => (
-                        <View key={ex.id} style={{ position: 'relative' }}>
-                          <TouchableOpacity
-                            style={[poster.darkCard, { borderLeftColor: color + '66' }]}
-                            onPress={() => !isDone && setSwapContext({ day, exerciseId: ex.id })}
-                            activeOpacity={isDone ? 1 : 0.7}
-                          >
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Text style={poster.cardName}>{ex.name}</Text>
-                              <Text style={poster.cardBadge}>{ex.type}</Text>
-                            </View>
-                            <Text style={poster.cardMuscles}>{ex.muscles}</Text>
-                            {isDone && ex.sets ? (
-                              <Text style={poster.cardSets}>
-                                {ex.sets.map(s => `${s.weight}kg × ${s.reps}`).join('  ·  ')}
-                              </Text>
-                            ) : (
-                              <>
-                                <Text style={poster.cardTarget}>{ex.target}</Text>
-                                <Text style={poster.cardCue}>{ex.cue}</Text>
-                              </>
-                            )}
-                          </TouchableOpacity>
-                          {!isDone && (
+                      {displayExercises.map((ex, i) => {
+                        const isHeadliner = ex.type === 'Compound';
+                        const progColor = !isDone ? getProgressColor(ex.name, ex.target, history) : undefined;
+                        return (
+                          <View key={ex.id} style={poster.lineupRow}>
                             <TouchableOpacity
-                              style={poster.cardRemove}
-                              onPress={() => setWeekPlan(prev => ({
-                                ...prev,
-                                [day]: (prev[day] ?? []).filter(e => e.id !== ex.id),
-                              }))}
+                              style={{ flex: 1 }}
+                              onPress={() => !isDone && setSwapContext({ day, exerciseId: ex.id })}
+                              activeOpacity={isDone ? 1 : 0.6}
                             >
-                              <Text style={poster.cardRemoveText}>✕</Text>
+                              <Text style={poster.lineupIdx}>{String(i + 1).padStart(2, '0')}</Text>
+                              <Text style={isHeadliner ? poster.lineupHeadline : poster.lineupSupport}>
+                                {ex.name.toUpperCase()}
+                              </Text>
+                              <Text style={poster.lineupMuscle}>{ex.muscles.toUpperCase()}</Text>
+                              {isDone && ex.sets ? (
+                                <Text style={poster.lineupSets}>
+                                  {ex.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}kg × ${s.reps}`).join('  ·  ')}
+                                </Text>
+                              ) : (
+                                <Text style={[poster.lineupTarget, progColor ? { color: progColor } : null]}>
+                                  {ex.target}
+                                </Text>
+                              )}
                             </TouchableOpacity>
-                          )}
-                        </View>
-                      ))}
+                            {!isDone && (
+                              <TouchableOpacity
+                                style={{ paddingLeft: 16, paddingVertical: 8 }}
+                                onPress={() => setWeekPlan(prev => ({
+                                  ...prev,
+                                  [day]: (prev[day] ?? []).filter(e => e.id !== ex.id),
+                                }))}
+                              >
+                                <Text style={poster.cardRemoveText}>✕</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        );
+                      })}
                       {!isDone && (
                         <TouchableOpacity
                           style={poster.addExBtn}
@@ -1402,21 +1522,6 @@ export default function HomeScreen() {
             });
             })()}
           </ScrollView>
-
-          {/* ── Week Coach Button ── */}
-          {WEEK_DAYS.every(d => completedDays.includes(d)) && (
-            <TouchableOpacity
-              style={poster.weekCoachBtn}
-              onPress={() => {
-                const weekEntries = WEEK_DAYS
-                  .map(d => history.find(h => WORKOUT_TO_DAY[h.workoutName] === d))
-                  .filter(Boolean) as HistoryEntry[];
-                Share.share({ message: formatWeekForCoach(weekEntries) });
-              }}
-            >
-              <Text style={poster.weekCoachBtnText}>COACH THIS WEEK →</Text>
-            </TouchableOpacity>
-          )}
 
           {/* ── Swap Modal ── */}
           {swapContext !== null && (
@@ -1522,6 +1627,7 @@ export default function HomeScreen() {
                 onRemove={() => setExercises(prev => prev.filter(e => e.id !== ex.id))}
                 onReorder={reorderExercise}
                 onConfirmSet={() => startFreshRest()}
+                prevSets={getPrevSets(ex.name, todayWorkout, history)}
               />
             ))}
             <TouchableOpacity style={styles.addExBtn} onPress={() => setActiveSwapId('__add__')}>
@@ -1778,7 +1884,14 @@ const poster = StyleSheet.create({
   slot: { paddingVertical: 20, paddingHorizontal: 24, alignItems: 'center' },
   artistName: { textAlign: 'center', textTransform: 'uppercase' },
   todayTag: { fontSize: 9, letterSpacing: 5, marginTop: 8, color: 'rgba(255,255,255,0.3)' },
-  cardList: { paddingHorizontal: 16, paddingBottom: 4 },
+  cardList: { paddingHorizontal: 20, paddingBottom: 4, paddingTop: 4 },
+  lineupRow: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', flexDirection: 'row', alignItems: 'center' },
+  lineupIdx: { fontSize: 9, color: '#2a2a3a', fontVariant: ['tabular-nums'], marginBottom: 4, letterSpacing: 1 },
+  lineupHeadline: { fontSize: 21, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
+  lineupSupport: { fontSize: 13, fontWeight: '600', color: '#555', letterSpacing: 1.5 },
+  lineupMuscle: { fontSize: 9, color: '#2a2a3a', letterSpacing: 3, marginTop: 3 },
+  lineupTarget: { fontSize: 11, color: '#444', marginTop: 5, letterSpacing: 0.5 },
+  lineupSets: { fontSize: 12, color: '#555', marginTop: 5, fontVariant: ['tabular-nums'] },
   darkCard: { backgroundColor: '#0c0c18', borderRadius: 6, padding: 14, marginBottom: 8, borderLeftWidth: 2 },
   cardName: { fontSize: 13, fontWeight: '600', color: '#ccc', flex: 1 },
   cardBadge: { fontSize: 9, letterSpacing: 2, color: '#333', textTransform: 'uppercase' },
