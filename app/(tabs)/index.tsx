@@ -882,6 +882,53 @@ function formatSessionForCoach(
   return lines.join('\n');
 }
 
+function formatWeekForCoach(weekEntries: HistoryEntry[]): string {
+  const totalVolume = weekEntries.reduce((total, entry) =>
+    total + entry.exercises.reduce((ev, ex) =>
+      ev + ex.sets.reduce((s, set) => {
+        const w = parseFloat(set.weight) || 0;
+        const r = parseInt(set.reps) || 0;
+        const dropVol = set.drops.reduce((dv, d) =>
+          dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
+        return s + w * r + dropVol;
+      }, 0), 0), 0);
+
+  const totalActive = weekEntries.reduce((t, e) => t + e.duration, 0);
+  const totalRest = weekEntries.reduce((t, e) => t + e.restTime, 0);
+
+  const lines: string[] = [
+    `WEEK REVIEW`,
+    `SESSIONS: ${weekEntries.length}  |  TOTAL VOLUME: ${totalVolume.toLocaleString()} kg`,
+    `ACTIVE: ${formatTime(totalActive)}  |  REST: ${formatTime(totalRest)}`,
+    ``,
+  ];
+
+  weekEntries.forEach(entry => {
+    const vol = entry.exercises.reduce((ev, ex) =>
+      ev + ex.sets.reduce((s, set) => {
+        const w = parseFloat(set.weight) || 0;
+        const r = parseInt(set.reps) || 0;
+        return s + w * r;
+      }, 0), 0);
+    lines.push(`── ${entry.workoutName} (${entry.date})  |  Vol: ${vol.toLocaleString()} kg  |  Active: ${formatTime(entry.duration)}`);
+    entry.exercises.forEach(ex => {
+      const sets = ex.sets.map(s => `${s.weight}kg×${s.reps}`).join('  ');
+      lines.push(`  ${ex.name}: ${sets}`);
+      if (ex.notes?.trim()) lines.push(`    Note: ${ex.notes.trim()}`);
+    });
+    lines.push('');
+  });
+
+  lines.push(`---`);
+  lines.push(`Based on this full week of training:`);
+  lines.push(`1. What are the key performance trends across all sessions?`);
+  lines.push(`2. Which muscles were over/under stimulated relative to targets?`);
+  lines.push(`3. What adjustments should I make for next week (volume, intensity, exercise selection)?`);
+  lines.push(`4. Any recovery or programming flags going into next week?`);
+
+  return lines.join('\n');
+}
+
 function formatUpcomingSessionForCoach(
   day: number,
   weekPlan: Record<number, Omit<Exercise, 'sets'>[]>,
@@ -1355,6 +1402,21 @@ export default function HomeScreen() {
             })()}
           </ScrollView>
 
+          {/* ── Week Coach Button ── */}
+          {WEEK_DAYS.every(d => completedDays.includes(d)) && (
+            <TouchableOpacity
+              style={poster.weekCoachBtn}
+              onPress={() => {
+                const weekEntries = WEEK_DAYS
+                  .map(d => history.find(h => WORKOUT_TO_DAY[h.workoutName] === d))
+                  .filter(Boolean) as HistoryEntry[];
+                Share.share({ message: formatWeekForCoach(weekEntries) });
+              }}
+            >
+              <Text style={poster.weekCoachBtnText}>COACH THIS WEEK →</Text>
+            </TouchableOpacity>
+          )}
+
           {/* ── Swap Modal ── */}
           {swapContext !== null && (
             <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
@@ -1725,6 +1787,8 @@ const poster = StyleSheet.create({
   cardSets: { fontSize: 12, color: '#666', marginTop: 6 },
   coachBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', alignItems: 'center' },
   coachBtnText: { fontSize: 11, letterSpacing: 5, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
+  weekCoachBtn: { margin: 16, paddingVertical: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center' },
+  weekCoachBtnText: { fontSize: 11, letterSpacing: 5, color: '#fff', fontWeight: '700' },
   swapSheet: { backgroundColor: '#0f0f1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, borderTopWidth: 1, borderColor: '#1e1e30' },
   swapTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 5, color: '#444', marginBottom: 12 },
   swapSearch: { backgroundColor: '#16162a', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, fontSize: 14, color: '#ccc', marginBottom: 12 },
