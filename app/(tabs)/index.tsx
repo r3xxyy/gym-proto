@@ -1420,106 +1420,139 @@ export default function HomeScreen() {
           </View>
 
           {/* ── Lineup ── */}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 16 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}>
             {(() => {
-              const nextUpDay = WEEK_DAYS.find(d => !completedDays.includes(d)) ?? null;
-              return WEEK_DAYS.map(day => {
-              const isToday = day === new Date().getDay();
-              const isDone = completedDays.includes(day);
-              const isExpanded = expandedDay === day;
-              const color = POSTER_COLORS[day];
-              const historyEntry = history.find(h => WORKOUT_TO_DAY[h.workoutName] === day);
-              const displayExercises: (Omit<Exercise, 'sets'> & { sets?: Exercise['sets'] })[] =
-                isDone && historyEntry ? historyEntry.exercises : weekPlan[day] ?? [];
-              const nameOpacity = isDone ? 0.18 : 1;
+              const todayDay = new Date().getDay();
+              const isWeekend = todayDay === 0 || todayDay === 6;
+              const DAY_ABBREVS: Record<number, string> = { 1: 'MON', 2: 'TUE', 3: 'WED', 4: 'THU', 5: 'FRI' };
+
+              // ── Weekend: full lineup, no headliner ──
+              if (isWeekend) {
+                return (
+                  <View style={poster.supportSection}>
+                    <Text style={[poster.headlinerLabel, { textAlign: 'center', marginBottom: 24, marginTop: 20 }]}>— THIS WEEK —</Text>
+                    {WEEK_DAYS.map((day, i) => {
+                      const done = completedDays.includes(day);
+                      return (
+                        <View key={day} style={[poster.supportRow, i < WEEK_DAYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' }]}>
+                          <Text style={poster.supportDay}>{DAY_ABBREVS[day]}</Text>
+                          <Text style={[poster.supportName, done && { opacity: 0.2 }]}>{POSTER_NAMES[day]}</Text>
+                          {done && <Text style={poster.supportDone}>✓</Text>}
+                        </View>
+                      );
+                    })}
+                  </View>
+                );
+              }
+
+              // ── Weekday: headliner + supporting acts ──
+              const headlineDay = todayDay;
+              const supportDays = WEEK_DAYS.filter(d => d !== headlineDay);
+              const headlineDone = completedDays.includes(headlineDay);
+              const headlineExpanded = expandedDay === headlineDay;
+              const headlineEntry = history.find(h => WORKOUT_TO_DAY[h.workoutName] === headlineDay);
+              const headlineExercises: (Omit<Exercise, 'sets'> & { sets?: Exercise['sets'] })[] =
+                headlineDone && headlineEntry ? headlineEntry.exercises : weekPlan[headlineDay] ?? [];
 
               return (
-                <View key={day}>
+                <>
+                  {/* ── Headliner ── */}
                   <TouchableOpacity
-                    style={[poster.slot, isToday && { backgroundColor: 'rgba(255,255,255,0.03)', borderTopWidth: 1, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }]}
-                    onPress={() => setExpandedDay(isExpanded ? null : day)}
-                    activeOpacity={0.6}
+                    style={poster.headlinerSlot}
+                    onPress={() => setExpandedDay(headlineExpanded ? null : headlineDay)}
+                    activeOpacity={0.7}
                   >
-                    {BOXED_DAYS.has(day) ? (
-                      <View style={{ borderWidth: 1.5, borderColor: `rgba(255,255,255,${isDone ? 0.1 : 0.7})`, paddingHorizontal: 24, paddingVertical: 10, marginTop: 6 }}>
-                        <AnimatedPosterName day={day} isActive={!isDone && day === nextUpDay} style={[poster.artistName, DAY_TEXT_STYLES[day], { color: `rgba(255,255,255,${nameOpacity})` }]} />
-                      </View>
-                    ) : (
-                      <AnimatedPosterName day={day} isActive={!isDone && day === nextUpDay} style={[poster.artistName, DAY_TEXT_STYLES[day], { color: `rgba(255,255,255,${nameOpacity})`, marginTop: 6 }]} />
-                    )}
-                    {isToday && <Text style={poster.todayTag}>— TODAY —</Text>}
+                    <Text style={poster.headlinerLabel}>— TONIGHT —</Text>
+                    <View style={poster.headlinerBox}>
+                      <AnimatedPosterName
+                        day={headlineDay}
+                        isActive={!headlineDone}
+                        style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? 'rgba(255,255,255,0.2)' : '#fff' }]}
+                      />
+                    </View>
+                    <Text style={poster.headlinerSub}>{SPLIT[headlineDay].toUpperCase()}</Text>
                   </TouchableOpacity>
 
-                  {isExpanded && (
+                  {/* ── Setlist ── */}
+                  {headlineExpanded && (
                     <View style={poster.cardList}>
-                      {displayExercises.map((ex, i) => {
-                        const isHeadliner = ex.type === 'Compound';
-                        const progColor = !isDone ? getProgressColor(ex.name, ex.target, history) : undefined;
+                      {headlineExercises.map((ex, i) => {
+                        const progColor = !headlineDone ? getProgressColor(ex.name, ex.target, history) : undefined;
+                        const weightMatch = ex.target.match(/^(\d+\.?\d*\s*kg)/);
+                        const weightLabel = weightMatch ? weightMatch[1] : '';
                         return (
-                          <View key={ex.id} style={poster.lineupRow}>
-                            <TouchableOpacity
-                              style={{ flex: 1 }}
-                              onPress={() => !isDone && setSwapContext({ day, exerciseId: ex.id })}
-                              activeOpacity={isDone ? 1 : 0.6}
-                            >
-                              <Text style={poster.lineupIdx}>{String(i + 1).padStart(2, '0')}</Text>
-                              <Text style={isHeadliner ? poster.lineupHeadline : poster.lineupSupport}>
-                                {ex.name.toUpperCase()}
-                              </Text>
-                              <Text style={poster.lineupMuscle}>{ex.muscles.toUpperCase()}</Text>
-                              {isDone && ex.sets ? (
+                          <TouchableOpacity
+                            key={ex.id}
+                            style={poster.lineupRow}
+                            onPress={() => !headlineDone && setSwapContext({ day: headlineDay, exerciseId: ex.id })}
+                            activeOpacity={headlineDone ? 1 : 0.5}
+                          >
+                            <Text style={poster.lineupIdx}>{String(i + 1).padStart(2, '0')}</Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={poster.lineupName}>{ex.name.toUpperCase()}</Text>
+                              <Text style={poster.lineupMuscle}>{ex.muscles.split(',')[0].trim().toUpperCase()}</Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              {headlineDone && ex.sets ? (
                                 <Text style={poster.lineupSets}>
-                                  {ex.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}kg × ${s.reps}`).join('  ·  ')}
+                                  {ex.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ')}
                                 </Text>
                               ) : (
-                                <Text style={[poster.lineupTarget, progColor ? { color: progColor } : null]}>
-                                  {ex.target}
-                                </Text>
+                                <>
+                                  <Text style={[poster.lineupWeight, progColor ? { color: progColor } : null]}>
+                                    {weightLabel || ex.target.split('×')[0].trim()}
+                                  </Text>
+                                  {!headlineDone && (
+                                    <TouchableOpacity
+                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
+                                      onPress={() => setWeekPlan(prev => ({
+                                        ...prev,
+                                        [headlineDay]: (prev[headlineDay] ?? []).filter(e => e.id !== ex.id),
+                                      }))}
+                                    >
+                                      <Text style={poster.lineupRemove}>✕</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </>
                               )}
-                            </TouchableOpacity>
-                            {!isDone && (
-                              <TouchableOpacity
-                                style={{ paddingLeft: 16, paddingVertical: 8 }}
-                                onPress={() => setWeekPlan(prev => ({
-                                  ...prev,
-                                  [day]: (prev[day] ?? []).filter(e => e.id !== ex.id),
-                                }))}
-                              >
-                                <Text style={poster.cardRemoveText}>✕</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
+                            </View>
+                          </TouchableOpacity>
                         );
                       })}
-                      {!isDone && (
-                        <TouchableOpacity
-                          style={poster.addExBtn}
-                          onPress={() => setSwapContext({ day, exerciseId: null })}
-                        >
+                      {!headlineDone && (
+                        <TouchableOpacity style={poster.addExBtn} onPress={() => setSwapContext({ day: headlineDay, exerciseId: null })}>
                           <Text style={poster.addExBtnText}>+ ADD EXERCISE</Text>
                         </TouchableOpacity>
                       )}
-                      {isDone && historyEntry && (
-                        <TouchableOpacity
-                          style={poster.coachBtn}
-                          onPress={() => Share.share({ message: formatSessionForCoach(SPLIT[day], historyEntry.date, historyEntry.duration, historyEntry.restTime, historyEntry.exercises) })}
-                        >
+                      {headlineDone && headlineEntry && (
+                        <TouchableOpacity style={poster.coachBtn} onPress={() => Share.share({ message: formatSessionForCoach(SPLIT[headlineDay], headlineEntry.date, headlineEntry.duration, headlineEntry.restTime, headlineEntry.exercises) })}>
                           <Text style={poster.coachBtnText}>Coach This →</Text>
                         </TouchableOpacity>
                       )}
-                      {!isDone && (
-                        <TouchableOpacity
-                          style={poster.coachBtn}
-                          onPress={() => Share.share({ message: formatUpcomingSessionForCoach(day, weekPlan, history) })}
-                        >
+                      {!headlineDone && (
+                        <TouchableOpacity style={poster.coachBtn} onPress={() => Share.share({ message: formatUpcomingSessionForCoach(headlineDay, weekPlan, history) })}>
                           <Text style={poster.coachBtnText}>Coach This →</Text>
                         </TouchableOpacity>
                       )}
                     </View>
                   )}
-                </View>
+
+                  {/* ── Supporting Acts ── */}
+                  <View style={poster.supportSection}>
+                    <View style={poster.supportDivider} />
+                    {supportDays.map((day, i) => {
+                      const done = completedDays.includes(day);
+                      return (
+                        <View key={day} style={[poster.supportRow, i < supportDays.length - 1 && { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' }]}>
+                          <Text style={poster.supportDay}>{DAY_ABBREVS[day]}</Text>
+                          <Text style={[poster.supportName, done && { opacity: 0.2 }]}>{POSTER_NAMES[day]}</Text>
+                          {done && <Text style={poster.supportDone}>✓</Text>}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </>
               );
-            });
             })()}
           </ScrollView>
 
@@ -1885,13 +1918,13 @@ const poster = StyleSheet.create({
   artistName: { textAlign: 'center', textTransform: 'uppercase' },
   todayTag: { fontSize: 9, letterSpacing: 5, marginTop: 8, color: 'rgba(255,255,255,0.3)' },
   cardList: { paddingHorizontal: 20, paddingBottom: 4, paddingTop: 4 },
-  lineupRow: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', flexDirection: 'row', alignItems: 'center' },
-  lineupIdx: { fontSize: 9, color: '#2a2a3a', fontVariant: ['tabular-nums'], marginBottom: 4, letterSpacing: 1 },
-  lineupHeadline: { fontSize: 21, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
-  lineupSupport: { fontSize: 13, fontWeight: '600', color: '#555', letterSpacing: 1.5 },
-  lineupMuscle: { fontSize: 9, color: '#2a2a3a', letterSpacing: 3, marginTop: 3 },
-  lineupTarget: { fontSize: 11, color: '#444', marginTop: 5, letterSpacing: 0.5 },
-  lineupSets: { fontSize: 12, color: '#555', marginTop: 5, fontVariant: ['tabular-nums'] },
+  lineupRow: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  lineupIdx: { fontSize: 10, color: '#555', fontVariant: ['tabular-nums'], letterSpacing: 1, width: 22 },
+  lineupName: { fontSize: 15, fontWeight: '700', color: '#e8e8e8', letterSpacing: 1.5 },
+  lineupMuscle: { fontSize: 9, color: '#555', letterSpacing: 3, marginTop: 4 },
+  lineupWeight: { fontSize: 13, fontWeight: '600', color: '#888', letterSpacing: 0.5, fontVariant: ['tabular-nums'] },
+  lineupSets: { fontSize: 12, color: '#999', fontVariant: ['tabular-nums'] },
+  lineupRemove: { fontSize: 10, color: '#333', marginTop: 6 },
   darkCard: { backgroundColor: '#0c0c18', borderRadius: 6, padding: 14, marginBottom: 8, borderLeftWidth: 2 },
   cardName: { fontSize: 13, fontWeight: '600', color: '#ccc', flex: 1 },
   cardBadge: { fontSize: 9, letterSpacing: 2, color: '#333', textTransform: 'uppercase' },
@@ -1919,6 +1952,18 @@ const poster = StyleSheet.create({
   cardRemoveText: { fontSize: 11, color: '#333' },
   addExBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center' },
   addExBtnText: { fontSize: 10, letterSpacing: 5, color: 'rgba(255,255,255,0.35)', fontWeight: '600' },
+  // Headliner slot
+  headlinerSlot: { paddingVertical: 32, paddingHorizontal: 24, alignItems: 'center' },
+  headlinerLabel: { fontSize: 9, letterSpacing: 6, color: 'rgba(255,255,255,0.25)', marginBottom: 16, textTransform: 'uppercase' },
+  headlinerBox: { alignItems: 'center', marginBottom: 12 },
+  headlinerSub: { fontSize: 9, letterSpacing: 5, color: 'rgba(255,255,255,0.2)', marginTop: 8, textTransform: 'uppercase' },
+  // Supporting acts
+  supportSection: { paddingHorizontal: 24, paddingBottom: 24 },
+  supportDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: 20 },
+  supportRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 14 },
+  supportDay: { fontSize: 8, letterSpacing: 3, color: '#333', width: 28, textTransform: 'uppercase' },
+  supportName: { fontSize: 11, fontWeight: '700', letterSpacing: 2, color: '#444', textTransform: 'uppercase', flex: 1 },
+  supportDone: { fontSize: 10, color: '#333' },
 });
 
 const week = StyleSheet.create({
