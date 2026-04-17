@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   Share,
   StyleSheet,
@@ -26,6 +28,7 @@ type Exercise = {
   target: string;
   cue: string;
   sets: Set[];
+  notes?: string;
   startedAt?: number;
   endedAt?: number;
 };
@@ -458,8 +461,7 @@ function ExerciseCard({
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, [field]: value } : s);
     const now = Date.now();
     const startedAt = field === 'weight' && !exercise.startedAt ? now : exercise.startedAt;
-    const endedAt = field === 'reps' && value ? now : exercise.endedAt;
-    onChange({ ...exercise, sets, startedAt, endedAt });
+    onChange({ ...exercise, sets, startedAt });
   }
 
   function updateRpe(si: number, value: string) {
@@ -586,6 +588,7 @@ function ExerciseCard({
           <TouchableOpacity
             onPress={() => {
               setConfirmedSets(prev => new Set([...prev, si]));
+              onChange({ ...exercise, endedAt: Date.now() });
               onConfirmSet?.();
             }}
             style={[card.confirmBtn, confirmedSets.has(si) && card.confirmBtnDone]}
@@ -602,6 +605,15 @@ function ExerciseCard({
       <TouchableOpacity style={card.addSet} onPress={addSet}>
         <Text style={card.addSetText}>+ Add Set</Text>
       </TouchableOpacity>
+
+      <TextInput
+        style={card.notes}
+        value={exercise.notes ?? ''}
+        onChangeText={text => onChange({ ...exercise, notes: text })}
+        placeholder="Notes…"
+        placeholderTextColor="#333"
+        multiline
+      />
 
       <Text style={card.cue}>{exercise.cue}</Text>
     </View>
@@ -812,25 +824,52 @@ function formatSessionForCoach(
   date: string,
   duration: number,
   restTime: number,
-  exs: Exercise[]
+  exs: Exercise[],
+  bodyweight?: string
 ): string {
+  const totalVolume = exs.reduce((total, ex) =>
+    total + ex.sets.reduce((s, set) => {
+      const w = parseFloat(set.weight) || 0;
+      const r = parseInt(set.reps) || 0;
+      const dropVol = set.drops.reduce((dv, d) =>
+        dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
+      return s + w * r + dropVol;
+    }, 0), 0);
+
   const lines: string[] = [
     `WORKOUT: ${workoutName}`,
     `DATE: ${date}`,
-    `ACTIVE: ${formatTime(duration)}  |  REST: ${formatTime(restTime)}`,
-    ``,
+    `SESSION: ${formatTime(duration + restTime)}  |  ACTIVE: ${formatTime(duration)}  |  REST: ${formatTime(restTime)}`,
+    `TOTAL VOLUME: ${totalVolume.toLocaleString()} kg`,
   ];
 
+  if (bodyweight && duration) {
+    const bw = parseFloat(bodyweight);
+    if (!isNaN(bw)) {
+      const kcal = Math.round(5 * bw * (duration / 3600));
+      lines.push(`BODYWEIGHT: ${bodyweight} kg  |  EST. KCAL: ${kcal} kcal`);
+    }
+  }
+
+  lines.push('');
+
   exs.forEach(ex => {
-    lines.push(`${ex.name} [${ex.muscles}] — ${ex.type}`);
+    const timeStr = ex.startedAt && ex.endedAt
+      ? `  [${formatTime(Math.round((ex.endedAt - ex.startedAt) / 1000))}]`
+      : '';
+    lines.push(`${ex.name} [${ex.muscles}] — ${ex.type}${timeStr}`);
     lines.push(`Target: ${ex.target}`);
     ex.sets.forEach((s, i) => {
       let row = `  Set ${i + 1}: ${s.weight}kg × ${s.reps}`;
+      if (s.rpe) row += ` @ RPE ${s.rpe}`;
       if (s.drops.length > 0) {
         row += `  →  ${s.drops.map(d => `${d.weight}kg × ${d.reps}`).join(' → ')}`;
       }
       lines.push(row);
     });
+    if (ex.notes?.trim()) {
+      lines.push(`  Note: ${ex.notes.trim()}`);
+    }
     lines.push('');
   });
 
@@ -1319,6 +1358,7 @@ export default function HomeScreen() {
           {/* ── Swap Modal ── */}
           {swapContext !== null && (
             <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
                   <Text style={poster.swapTitle}>{swapContext.exerciseId === null ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
@@ -1377,6 +1417,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
+              </KeyboardAvoidingView>
             </TouchableOpacity>
           )}
 
@@ -1435,6 +1476,7 @@ export default function HomeScreen() {
               activeOpacity={1}
               onPress={() => { setActiveSwapId(null); setSwapQuery(''); }}
             >
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
               <TouchableOpacity activeOpacity={1} onPress={() => {}}>
                 <View style={poster.swapSheet}>
                   <Text style={poster.swapTitle}>{activeSwapId === '__add__' ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
@@ -1494,6 +1536,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
+              </KeyboardAvoidingView>
             </TouchableOpacity>
           )}
         </View>
@@ -1562,7 +1605,7 @@ export default function HomeScreen() {
               style={[styles.button, { marginTop: 24, backgroundColor: '#080810' }]}
               onPress={() => {
                 const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-                Share.share({ message: formatSessionForCoach(todayWorkout, date, finalSeconds, finalRest, exercises) });
+                Share.share({ message: formatSessionForCoach(todayWorkout, date, finalSeconds, finalRest, exercises, bodyweight) });
               }}
             >
               <Text style={styles.buttonText}>Coach This →</Text>
@@ -1760,6 +1803,7 @@ const card = StyleSheet.create({
   confirmBtnTextDone: { color: '#fff' },
   addSet: { marginTop: 4 },
   addSetText: { fontSize: 13, color: '#007AFF' },
+  notes: { fontSize: 13, color: '#ccc', marginTop: 10, borderBottomWidth: 1, borderBottomColor: '#1e1e30', paddingVertical: 6 },
   cue: { fontSize: 12, color: '#aaa', marginTop: 8, fontStyle: 'italic' },
   exTime: { fontSize: 12, color: '#888', marginTop: 6 },
   swapHint: { fontSize: 10, color: '#007AFF', opacity: 0.6, marginTop: 1, letterSpacing: 0.5 },
