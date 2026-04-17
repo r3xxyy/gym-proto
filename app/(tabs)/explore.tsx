@@ -337,9 +337,9 @@ export default function StatsScreen() {
       {/* ── Coach This ── */}
       <TouchableOpacity
         style={s.coachBtn}
-        onPress={() => Share.share({ message: formatStatsForCoach(muscleVolume, prs, weeks, history.length) })}
+        onPress={() => Share.share({ message: formatWeekForCoach(weekEntries) })}
       >
-        <Text style={s.coachBtnText}>Coach This →</Text>
+        <Text style={s.coachBtnText}>Coach This Week →</Text>
       </TouchableOpacity>
 
       {/* ── Coach This Week ── */}
