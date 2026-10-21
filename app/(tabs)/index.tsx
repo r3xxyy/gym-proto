@@ -17,7 +17,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { Swipeable, GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ActRow } from '@/components/act-row';
@@ -28,6 +27,9 @@ import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { ALL_BADGES, checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
 import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, PUSH_EXERCISES, LEG_A_EXERCISES, PULL_EXERCISES, SHOULDER_EXERCISES, LEG_B_EXERCISES, SWAP_POOL, W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES, getWeekExercises, SPLIT, SPLIT_LABEL, WORKOUT_ORDER, WEEK_DAYS, POSTER_NAMES, DAY_TEXT_STYLES, BOXED_DAYS } from '../../constants/programs';
+
+// Wall-clock read for event handlers; kept out of component bodies so the compiler sees them as impure-free.
+const nowMs = () => Date.now();
 
 // Show banners + play sound even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -100,33 +102,6 @@ function getRestDuration(exercise: Exercise): number {
   }
 
   return REST_TIERS[tier][band];
-}
-
-// ─── Progressive overload color ───────────────────────────────────────────────
-
-function getProgressColor(exName: string, targetStr: string, history: HistoryEntry[]): string | undefined {
-  const match = targetStr.match(/^(\d+\.?\d*)\s*kg/);
-  if (!match) return undefined;
-  const targetWeight = parseFloat(match[1]);
-
-  let prevWeight: number | null = null;
-  for (const entry of history) {
-    for (const ex of entry.exercises) {
-      if (ex.name === exName) {
-        for (const s of ex.sets) {
-          const w = parseFloat(s.weight);
-          if (!isNaN(w) && w > 0) {
-            prevWeight = prevWeight === null ? w : Math.max(prevWeight, w);
-          }
-        }
-      }
-    }
-  }
-
-  if (prevWeight === null) return undefined;
-  if (targetWeight > prevWeight) return '#34C759';
-  if (targetWeight < prevWeight) return '#FF3B30';
-  return undefined; // same — default colour
 }
 
 // Parse "Tue, 14 Apr 2026" → timestamp. Strips weekday prefix before calling Date.parse.
@@ -299,131 +274,6 @@ function initExercises(): Exercise[] {
   const day = new Date().getDay();
   const list = WORKOUT_EXERCISES[day] ?? [];
   return list.map(e => ({ ...e, sets: parseTargetForSets(e.target) }));
-}
-
-// ─── Muscle Diagram ──────────────────────────────────────────────────────────
-
-type MuscleGroup =
-  | 'chest_upper' | 'chest_mid' | 'chest_lower'
-  | 'biceps_long' | 'biceps_short' | 'triceps' | 'deltoid' | 'abs'
-  | 'quads' | 'hamstrings' | 'glutes' | 'rear_delt' | 'lats' | 'calves';
-
-const MUSCLE_MAP: Record<string, MuscleGroup[]> = {
-  'mid chest':        ['chest_mid'],
-  'upper chest':      ['chest_upper'],
-  'lower chest':      ['chest_lower'],
-  'chest':            ['chest_upper', 'chest_mid', 'chest_lower'],
-  'triceps':          ['triceps'],
-  'biceps':           ['biceps_long', 'biceps_short'],
-  'biceps long head': ['biceps_long'],
-  'biceps short head':['biceps_short'],
-  'brachialis':       ['biceps_long'],
-  'deltoid':          ['deltoid'],
-  'shoulders':        ['deltoid'],
-  'quads':            ['quads'],
-  'hamstrings':       ['hamstrings'],
-  'glutes':           ['glutes'],
-  'glute maximus':    ['glutes'],
-  'lats':             ['lats'],
-  'rear delt':        ['rear_delt'],
-  'gastrocnemius':    ['calves'],
-  'calves':           ['calves'],
-  'upper back':       ['lats'],
-  'mid back':         ['lats'],
-  'lateral delt':     ['deltoid'],
-  'anterior delt':    ['deltoid'],
-};
-
-function parseMuscles(str: string): MuscleGroup[] {
-  const parts = str.split(',').map(s => s.trim().toLowerCase());
-  const result = new Set<MuscleGroup>();
-  parts.forEach(p => (MUSCLE_MAP[p] ?? []).forEach(m => result.add(m)));
-  return [...result];
-}
-
-const HIT = '#FF6B6B';
-const OFF = '#EBEBEB';
-const STR = '#C8C8C8';
-
-function FrontView({ c, sw }: { c: (g: MuscleGroup) => string; sw: string }) {
-  return (
-    <Svg width="80" height="140" viewBox="0 0 80 140">
-      <Circle cx="40" cy="9" r="8" fill={OFF} stroke={STR} strokeWidth="0.8" />
-      <Path d="M36,17 L44,17 L43,23 L37,23 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      <Ellipse cx="21" cy="30" rx="8" ry="7" fill={c('deltoid')} stroke={STR} strokeWidth={sw} />
-      <Ellipse cx="59" cy="30" rx="8" ry="7" fill={c('deltoid')} stroke={STR} strokeWidth={sw} />
-      <Path d="M29,23 L51,23 L50,35 L30,35 Z" fill={c('chest_upper')} stroke="#999" strokeWidth="1.2" />
-      <Path d="M30,35 L50,35 L49,46 L31,46 Z" fill={c('chest_mid')} stroke="#999" strokeWidth="1.2" />
-      <Path d="M31,46 L49,46 L48,55 L32,55 Z" fill={c('chest_lower')} stroke="#999" strokeWidth="1.2" />
-      <Path d="M32,55 L48,55 L47,78 L33,78 Z" fill={c('abs')} stroke={STR} strokeWidth={sw} />
-      <Path d="M10,26 L16,26 L14,66 L8,66 Z" fill={c('triceps')} stroke={STR} strokeWidth={sw} />
-      <Path d="M15,26 L21,26 L19,66 L13,66 Z" fill={c('biceps_long')} stroke={STR} strokeWidth={sw} />
-      <Path d="M20,26 L27,26 L25,66 L18,66 Z" fill={c('biceps_short')} stroke={STR} strokeWidth={sw} />
-      <Path d="M53,26 L60,26 L62,66 L55,66 Z" fill={c('biceps_short')} stroke={STR} strokeWidth={sw} />
-      <Path d="M59,26 L65,26 L67,66 L61,66 Z" fill={c('biceps_long')} stroke={STR} strokeWidth={sw} />
-      <Path d="M64,26 L70,26 L72,66 L66,66 Z" fill={c('triceps')} stroke={STR} strokeWidth={sw} />
-      <Path d="M14,66 L24,66 L22,92 L12,92 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      <Path d="M56,66 L66,66 L68,92 L58,92 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      <Path d="M33,78 L46,78 L45,118 L32,118 Z" fill={c('quads')} stroke={STR} strokeWidth={sw} />
-      <Path d="M34,78 L47,78 L48,118 L35,118 Z" fill={c('quads')} stroke={STR} strokeWidth={sw} />
-      <Path d="M32,118 L45,118 L43,135 L30,135 Z" fill={c('calves')} stroke={STR} strokeWidth={sw} />
-      <Path d="M35,118 L48,118 L50,135 L37,135 Z" fill={c('calves')} stroke={STR} strokeWidth={sw} />
-    </Svg>
-  );
-}
-
-function BackView({ c, sw }: { c: (g: MuscleGroup) => string; sw: string }) {
-  return (
-    <Svg width="80" height="140" viewBox="0 0 80 140">
-      <Circle cx="40" cy="9" r="8" fill={OFF} stroke={STR} strokeWidth="0.8" />
-      <Path d="M36,17 L44,17 L43,23 L37,23 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      {/* Rear delts */}
-      <Ellipse cx="21" cy="30" rx="8" ry="7" fill={c('rear_delt')} stroke={STR} strokeWidth={sw} />
-      <Ellipse cx="59" cy="30" rx="8" ry="7" fill={c('rear_delt')} stroke={STR} strokeWidth={sw} />
-      {/* Traps */}
-      <Path d="M29,23 L51,23 L50,38 L30,38 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      {/* Lats */}
-      <Path d="M30,38 L50,38 L52,65 L28,65 Z" fill={c('lats')} stroke={STR} strokeWidth={sw} />
-      {/* Lower back */}
-      <Path d="M32,65 L48,65 L47,78 L33,78 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      {/* Left triceps (visible from back) */}
-      <Path d="M10,26 L20,26 L18,66 L8,66 Z" fill={c('triceps')} stroke={STR} strokeWidth={sw} />
-      {/* Right triceps */}
-      <Path d="M60,26 L70,26 L72,66 L62,66 Z" fill={c('triceps')} stroke={STR} strokeWidth={sw} />
-      {/* Left forearm */}
-      <Path d="M8,66 L18,66 L16,92 L6,92 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      {/* Right forearm */}
-      <Path d="M62,66 L72,66 L74,92 L64,92 Z" fill={OFF} stroke={STR} strokeWidth={sw} />
-      {/* Glutes */}
-      <Path d="M33,78 L47,78 L48,100 L32,100 Z" fill={c('glutes')} stroke="#999" strokeWidth="1.2" />
-      {/* Left hamstring */}
-      <Path d="M33,100 L46,100 L45,118 L32,118 Z" fill={c('hamstrings')} stroke="#999" strokeWidth="1.2" />
-      {/* Right hamstring */}
-      <Path d="M34,100 L47,100 L48,118 L35,118 Z" fill={c('hamstrings')} stroke="#999" strokeWidth="1.2" />
-      {/* Calves (gastrocnemius - back of lower leg) */}
-      <Path d="M32,118 L45,118 L43,135 L30,135 Z" fill={c('calves')} stroke={STR} strokeWidth={sw} />
-      <Path d="M35,118 L48,118 L50,135 L37,135 Z" fill={c('calves')} stroke={STR} strokeWidth={sw} />
-    </Svg>
-  );
-}
-
-function BodyDiagram({ muscles }: { muscles: string }) {
-  const [showBack, setShowBack] = useState(false);
-  const active = parseMuscles(muscles);
-  const c = (g: MuscleGroup) => active.includes(g) ? HIT : OFF;
-  const sw = '0.8';
-
-  return (
-    <View style={{ alignItems: 'center' }}>
-      {showBack
-        ? <BackView c={c} sw={sw} />
-        : <FrontView c={c} sw={sw} />
-      }
-      <TouchableOpacity onPress={() => setShowBack(v => !v)} style={diag.toggle}>
-        <Text style={diag.toggleText}>{showBack ? 'Front' : 'Back'}</Text>
-      </TouchableOpacity>
-    </View>
-  );
 }
 
 // ─── History Exercise Card ────────────────────────────────────────────────────
@@ -607,8 +457,7 @@ function ExerciseCard({
 
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, [field]: value } : s);
-    const now = Date.now();
-    const startedAt = field === 'weight' && !exercise.startedAt ? now : exercise.startedAt;
+    const startedAt = field === 'weight' && !exercise.startedAt ? nowMs() : exercise.startedAt;
     onChange({ ...exercise, sets, startedAt });
   }
 
@@ -670,7 +519,7 @@ function ExerciseCard({
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, done: true } : s);
-    onChange({ ...exercise, sets, endedAt: Date.now() });
+    onChange({ ...exercise, sets, endedAt: nowMs() });
     setRateOpen(si);
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
@@ -1544,41 +1393,6 @@ function deriveTargetsFromHistory(
   return result;
 }
 
-// ─── Target green-highlight helper ────────────────────────────────────────────
-function getTargetChanges(exName: string, workoutDay: number, newTarget: string, history: HistoryEntry[]): { weightGreen: boolean; repsGreen: boolean } {
-  // Build PR map — same logic as Progress screen, so colours match what PRs show
-  const prMap: Record<string, number> = {};
-  for (const entry of history) {
-    for (const ex of entry.exercises) {
-      for (const s of ex.sets) {
-        const w = parseFloat(s.weight);
-        if (!isNaN(w) && w > 0 && (!prMap[ex.name] || w > prMap[ex.name])) {
-          prMap[ex.name] = w;
-        }
-      }
-    }
-  }
-
-  // Look up PR with exact match first, then prefix fallback for name variations
-  const searchName = exName.toLowerCase().trim();
-  let prWeight = 0;
-  for (const [name, weight] of Object.entries(prMap)) {
-    const hn = name.toLowerCase().trim();
-    if (hn === searchName || hn.startsWith(searchName) || searchName.startsWith(hn)) {
-      if (weight > prWeight) prWeight = weight;
-    }
-  }
-
-  if (!prWeight) return { weightGreen: false, repsGreen: false };
-
-  const wMatch = newTarget.match(/(\d+\.?\d*)\s*kg/);
-  const newW = wMatch ? parseFloat(wMatch[1]) : 0;
-  return {
-    weightGreen: newW > 0 && newW > prWeight,
-    repsGreen: false,
-  };
-}
-
 // Last-session comparison — used for target colour on home screen and active card.
 function getLastSessionColor(exName: string, workoutName: string, targetStr: string, history: HistoryEntry[], activeGym?: string): { weightGreen: boolean; repsGreen: boolean } {
   const isFree = FREE_WEIGHT_EXERCISES.has(exName);
@@ -1592,22 +1406,6 @@ function getLastSessionColor(exName: string, workoutName: string, targetStr: str
   const wMatch = targetStr.match(/(\d+\.?\d*)\s*kg/);
   const targetW = wMatch ? parseFloat(wMatch[1]) : 0;
   return { weightGreen: targetW > 0 && targetW > prevMax, repsGreen: false };
-}
-
-function HighlightedTarget({ target, weightGreen, repsGreen, style }: { target: string; weightGreen: boolean; repsGreen: boolean; style?: object }) {
-  const wMatch = target.match(/^([\s\S]*?)(\d+\.?\d*)(\s*kg\s*×\s*)(\d+)([\s\S]*)$/);
-  if (!wMatch) return <Text style={style}>{target}</Text>;
-  const [, pre, weight, mid, reps, rest] = wMatch;
-  const GREEN = '#34C759';
-  return (
-    <Text style={style}>
-      {pre}
-      <Text style={weightGreen ? { color: GREEN } : {}}>{weight}</Text>
-      {mid}
-      <Text style={repsGreen ? { color: GREEN } : {}}>{reps}</Text>
-      {rest}
-    </Text>
-  );
 }
 
 const SEED_HISTORY: HistoryEntry[] = [
@@ -1897,19 +1695,19 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (isOvertime) {
-      continuePulse.value = withRepeat(
+      continuePulse.set(withRepeat(
         withSequence(withTiming(1.04, { duration: 500 }), withTiming(1, { duration: 500 })),
         -1,
         false
-      );
+      ));
     } else {
-      continuePulse.value = withTiming(1, { duration: 150 });
+      continuePulse.set(withTiming(1, { duration: 150 }));
     }
   }, [isOvertime]);
 
   function logRestDay(day: number) {
     const entry: HistoryEntry = {
-      id: Date.now().toString(),
+      id: nowMs().toString(),
       date: new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
       workoutName: SPLIT[day],
       duration: 0,
@@ -2744,7 +2542,7 @@ export default function HomeScreen() {
                           setSwapQuery('');
                         }}
                       >
-                        <Text style={poster.swapOptName}>"{swapQuery.trim()}"</Text>
+                        <Text style={poster.swapOptName}>&quot;{swapQuery.trim()}&quot;</Text>
                         <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
                     )}
@@ -2942,7 +2740,7 @@ export default function HomeScreen() {
                           setSwapQuery('');
                         }}
                       >
-                        <Text style={poster.swapOptName}>"{swapQuery.trim()}"</Text>
+                        <Text style={poster.swapOptName}>&quot;{swapQuery.trim()}&quot;</Text>
                         <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
                       </TouchableOpacity>
                     )}
@@ -3297,16 +3095,6 @@ const poster = StyleSheet.create({
   supportDone: { fontSize: 10, color: Ink.textFaint },
 });
 
-const week = StyleSheet.create({
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 8 },
-  rowDone: { backgroundColor: '#f5f5f5' },
-  rowToday: { borderLeftWidth: 3, borderLeftColor: '#333' },
-  dayName: { fontSize: 16, fontWeight: '600', color: Ink.textFaint },
-  dayNameDone: { color: '#bbb' },
-  chevron: { fontSize: 11, color: Ink.textDim },
-  cardList: { paddingHorizontal: 4, paddingBottom: 4 },
-});
-
 const swap = StyleSheet.create({
   btn: { marginTop: 10, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 14, borderWidth: 1, borderColor: '#ddd', borderRadius: 6 },
   btnText: { fontSize: 12, color: Ink.textDim },
@@ -3392,19 +3180,6 @@ const aCard = StyleSheet.create({
   rpeGuideRir: { width: 44, fontSize: 12, color: Ink.textDim, fontVariant: ['tabular-nums'] },
   rpeGuideDesc: { fontSize: 12, color: Ink.textFaint, flex: 1 },
 });
-
-const diag = StyleSheet.create({
-  toggle: {
-    marginTop: 4,
-    paddingVertical: 3,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-  },
-  toggleText: { fontSize: 11, color: Ink.textDim },
-});
-
 
 const badgeOverlay = StyleSheet.create({
   backdrop: {

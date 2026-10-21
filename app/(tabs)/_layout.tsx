@@ -30,14 +30,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.bar.fill" color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="cardio"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="WeeklyBgShape"
-        options={{ href: null }}
-      />
     </Tabs>
   );
 }

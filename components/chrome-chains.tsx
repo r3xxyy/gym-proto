@@ -325,9 +325,12 @@ export function ChromeChains({ paused = false }: Props) {
   }, []);
 
   const loop = useCallback(() => {
-    drawRef.current?.(Date.now() / 1000);
-    glRef.current?.endFrameEXP?.();
-    rafRef.current = requestAnimationFrame(loop);
+    function tick() {
+      drawRef.current?.(Date.now() / 1000);
+      glRef.current?.endFrameEXP?.();
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    tick();
   }, []);
 
   const start = useCallback(() => {
@@ -338,7 +341,7 @@ export function ChromeChains({ paused = false }: Props) {
       glRef.current?.endFrameEXP?.();
       return;
     }
-    rafRef.current = requestAnimationFrame(loop);
+    loop();
   }, [paused, reduceMotion, loop]);
 
   useEffect(() => {
@@ -383,7 +386,7 @@ export function ChromeChains({ paused = false }: Props) {
     };
     const linkGeo = upload(buildLink());
     const carabinerGeo = upload(buildCarabiner());
-    const useGeo = (g: typeof linkGeo) => {
+    const bindGeometry = (g: typeof linkGeo) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, g.pos);
       gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, g.nor);
@@ -484,7 +487,7 @@ export function ChromeChains({ paused = false }: Props) {
           return (((v % span) + span) % span) - span / 2;
         };
 
-        useGeo(linkGeo);
+        bindGeometry(linkGeo);
         for (let i = 0; i < count; i++) {
           const base = i < ic ? i * pitchU : (ic - 1) * pitchU + 2 * gapU + (i - ic) * pitchU;
           // Neighbours of the carabiner sit edge-on to it, and orientation alternates from there.
@@ -492,7 +495,7 @@ export function ChromeChains({ paused = false }: Props) {
           place(s, linkGeo.count, t, along(base), dist % 2 === 0, i + k * 17);
         }
 
-        useGeo(carabinerGeo);
+        bindGeometry(carabinerGeo);
         place(s, carabinerGeo.count, t, along((ic - 1) * pitchU + gapU), false, 101 + k);
       });
     };
