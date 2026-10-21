@@ -419,6 +419,18 @@ export const SPLIT: Record<number, string> = {
   0: 'Rest Day',
 };
 
+// What the app shows under each poster name. SPLIT holds the stored names that history is
+// matched on, so display tweaks live here instead.
+export const SPLIT_LABEL: Record<number, string> = {
+  1: 'Leg A',
+  2: 'Push Day',
+  3: 'Pull Day',
+  4: 'Shoulder Day',
+  5: 'Leg B',
+  6: 'Rest Day',
+  0: 'Rest Day',
+};
+
 export const WORKOUT_ORDER = ['Leg A', 'Push Day', 'Pull Day', 'Boulder Shoulder', 'Leg B'];
 
 // ─── Poster UI Constants ──────────────────────────────────────────────────────

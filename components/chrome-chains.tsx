@@ -85,6 +85,42 @@ function sweep(mesh: Mesh, path: PathPoint[], radius: number, closed: boolean) {
   }
 }
 
+/**
+ * A rivet or pin lying along z: a short barrel with domed heads, centred on (cx, cy).
+ * Revolved from a profile of (radius, z, normal-radial, normal-z).
+ */
+function addPin(mesh: Mesh, cx: number, cy: number, r: number, h: number) {
+  const SEG = 16;
+  const d = r * 0.35;
+  const profile: [number, number, number, number][] = [
+    [0, -h - d, 0, -1],
+    [0.6 * r, -h - 0.8 * d, 0.3, -0.95],
+    [r, -h, 0.75, -0.66],
+    [r, h, 0.75, 0.66],
+    [0.6 * r, h + 0.8 * d, 0.3, 0.95],
+    [0, h + d, 0, 1],
+  ];
+  const base = mesh.positions.length / 3;
+  for (const [rad, z, nr, nz] of profile) {
+    for (let j = 0; j < SEG; j++) {
+      const phi = (j / SEG) * Math.PI * 2;
+      const c = Math.cos(phi), sn = Math.sin(phi);
+      mesh.positions.push(cx + rad * c, cy + rad * sn, z);
+      const l = Math.hypot(nr, nz);
+      mesh.normals.push((nr * c) / l, (nr * sn) / l, nz / l);
+    }
+  }
+  for (let i = 0; i < profile.length - 1; i++) {
+    for (let j = 0; j < SEG; j++) {
+      const a = base + i * SEG + j;
+      const b = base + (i + 1) * SEG + j;
+      const a2 = base + i * SEG + ((j + 1) % SEG);
+      const b2 = base + (i + 1) * SEG + ((j + 1) % SEG);
+      mesh.indices.push(a, b, a2, b, b2, a2);
+    }
+  }
+}
+
 const finish = (m: Mesh) => ({
   positions: new Float32Array(m.positions),
   normals: new Float32Array(m.normals),
@@ -115,8 +151,20 @@ function buildCarabiner() {
     Array.from({ length: 6 }, (_, i) => ({ p: [CR, y0 + ((y1 - y0) * i) / 5] as [number, number], n: [1, 0] as [number, number] }));
   sweep(mesh, bar(-CL / 2, CL / 2), GATE_WIRE, false);
 
-  // Screw sleeve: a fat collar near the hinge end of the gate.
-  sweep(mesh, bar(-CL / 2 + 0.05, -CL / 2 + 0.3), SLEEVE_WIRE, false);
+  // Screw sleeve: a knurled collar near the hinge end of the gate, ridges alternating in radius.
+  const ridges = 7;
+  for (let k = 0; k < ridges; k++) {
+    const y0 = -CL / 2 + 0.04 + k * 0.045;
+    sweep(mesh, bar(y0, y0 + 0.045), k % 2 === 0 ? SLEEVE_WIRE : SLEEVE_WIRE + 0.02, false);
+  }
+  // Thin washer where the sleeve meets the gate.
+  sweep(mesh, bar(-CL / 2 + 0.04 + ridges * 0.045, -CL / 2 + 0.07 + ridges * 0.045), SLEEVE_WIRE - 0.035, false);
+
+  // Hardware: hinge pin, nose pin and a rivet plate on the spine, heads proud of both faces.
+  addPin(mesh, CR, -CL / 2 - 0.015, 0.075, CWIRE + 0.012);
+  addPin(mesh, CR, CL / 2 + 0.015, 0.065, CWIRE + 0.01);
+  addPin(mesh, -CR, 0, 0.12, CWIRE + 0.012);
+  addPin(mesh, -CR, 0, 0.05, CWIRE + 0.03);
   return finish(mesh);
 }
 
@@ -179,14 +227,16 @@ void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
 }`;
 
-// Liquid metal: the surface reflects a dim, soft procedural studio. Low-frequency noise bends
-// the reflections so they flow, and a tone curve keeps the highlights from blowing out.
+// Liquid mercury: a smooth, almost perfect mirror of a dark studio with a few tall soft panels.
+// Slow, low-frequency noise drifts through the normals so the reflections swim and pool like a
+// liquid; a tone curve keeps the brightest panels silver rather than white.
 const FS = `
 precision highp float;
 uniform vec3 uCam;
 uniform float uSeed;
 uniform float uRough;
 uniform float uDim;
+uniform float uTime;
 varying vec3 vNor;
 varying vec3 vPos;
 varying vec3 vLocal;
@@ -206,39 +256,53 @@ float noise(vec3 x) {
     f.z);
 }
 
+// Soft-edged band: 1 inside |x - c| < w, fading to 0 over 'soft'.
+float band(float x, float c, float w, float soft) {
+  return smoothstep(w + soft, w - soft, abs(x - c));
+}
+
 vec3 studio(vec3 r) {
   float up = r.y;
-  // A dim, soft-edged studio: mid-grey sky, deep floor, a gentle horizon and weak lights.
-  // Keeping the range low is what stops the metal from blowing out to white.
-  vec3 sky = mix(vec3(0.38, 0.40, 0.46), vec3(0.95, 0.96, 1.0), smoothstep(-0.1, 0.8, up));
-  vec3 floorc = mix(vec3(0.01, 0.01, 0.015), vec3(0.2, 0.21, 0.25), smoothstep(-1.0, 0.0, up));
-  vec3 c = mix(floorc, sky, smoothstep(-0.14, 0.14, up));
-  c *= 1.0 - 0.55 * exp(-pow((up - 0.05) / 0.12, 2.0));
-  vec3 l1 = normalize(vec3(-0.6, 0.5, 0.6));
-  vec3 l2 = normalize(vec3(0.7, 0.3, 0.4));
-  vec3 l3 = normalize(vec3(0.1, 0.8, -0.5));
-  c += vec3(1.0) * pow(max(dot(r, l1), 0.0), 18.0) * 1.1;
-  c += vec3(0.85, 0.92, 1.0) * pow(max(dot(r, l2), 0.0), 12.0) * 0.6;
-  c += vec3(1.0) * pow(max(dot(r, l3), 0.0), 30.0) * 0.7;
+  float az = atan(r.x, r.z);
+  // Cool grey sky over a near-black floor, with a crisp horizon: the horizon line bending across
+  // the curved wire is what makes the surface read as mercury.
+  vec3 sky = mix(vec3(0.50, 0.53, 0.58), vec3(0.97, 0.98, 1.0), smoothstep(-0.05, 0.8, up));
+  vec3 floorc = mix(vec3(0.02, 0.02, 0.025), vec3(0.42, 0.43, 0.46), smoothstep(-1.0, -0.04, up));
+  vec3 c = mix(floorc, sky, smoothstep(-0.035, 0.035, up));
+  // Dark band hugging the horizon, deepening the contrast along the wire.
+  c *= 1.0 - 0.5 * exp(-pow((up - 0.10) / 0.09, 2.0));
+  // Tall soft panels, each a bright vertical strip.
+  float v1 = smoothstep(0.02, 0.2, up) * (1.0 - smoothstep(0.65, 0.9, up));
+  c += vec3(0.95, 0.97, 1.0) * band(az, -0.95, 0.20, 0.16) * v1 * 0.85;
+  c += vec3(0.85, 0.92, 1.0) * band(az, 0.75, 0.10, 0.12) * v1 * 0.70;
+  c += vec3(1.0, 0.99, 0.97) * band(az, 2.45, 0.32, 0.20) * v1 * 0.60;
+  // A broad soft box behind the camera, which is what camera-facing surfaces mirror.
+  c += vec3(0.95, 0.96, 0.98) * band(az, 0.0, 0.5, 0.45) * smoothstep(-0.2, 0.3, up) * 0.5;
+  // A strip light overhead and a faint cool kicker low behind.
+  c += vec3(1.0) * band(up, 0.93, 0.03, 0.05) * 0.5;
+  c += vec3(0.4, 0.5, 0.7) * band(az, -2.6, 0.25, 0.25) * (1.0 - v1) * smoothstep(-0.6, -0.1, up) * 0.35;
   return c;
 }
 
 void main() {
   vec3 q = vLocal + vec3(uSeed * 1.7, uSeed * 0.3, uSeed * 2.9);
   vec3 n0 = normalize(vNor);
-  // A slow, low-frequency wobble in the normal makes reflections flow like liquid metal.
-  // The fine ripple is almost nothing, except on the out-of-focus strand.
-  vec3 flow = vec3(noise(q * 2.5), noise(q * 2.5 + 11.0), noise(q * 2.5 + 23.0)) - 0.5;
+  // Two slow drifting octaves of normal wobble: the reflections flow instead of sitting still.
+  float tt = uTime * 0.12;
+  vec3 f1 = vec3(noise(q * 2.2 + tt), noise(q * 2.2 + 11.0 - tt), noise(q * 2.2 + 23.0 + tt)) - 0.5;
+  vec3 f2 = vec3(noise(q * 5.0 - tt * 1.7), noise(q * 5.0 + 7.0), noise(q * 5.0 + 19.0 + tt * 1.3)) - 0.5;
   vec3 ripple = vec3(noise(q * 30.0), noise(q * 30.0 + 11.0), noise(q * 30.0 + 23.0)) - 0.5;
-  vec3 n = normalize(n0 + flow * 0.22 + ripple * (0.02 + 0.5 * uRough));
+  vec3 n = normalize(n0 + f1 * 0.42 + f2 * 0.14 + ripple * (0.012 + 0.5 * uRough));
 
   vec3 v = normalize(vPos - uCam);
   vec3 env = studio(reflect(v, n));
 
-  // Soft shoulder instead of a hard clip: bright areas roll off to silver, never to white.
-  vec3 c = 1.0 - exp(-env * 1.6);
-  c += 0.03 * pow(1.0 - max(dot(n0, -v), 0.0), 3.0);
-  gl_FragColor = vec4(c * uDim * vec3(0.97, 0.99, 1.02), 1.0);
+  // Soft shoulder, then a gentle S-curve for the high contrast of liquid metal.
+  vec3 c = 1.0 - exp(-env * 2.8);
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.35);
+  float rim = pow(1.0 - max(dot(n0, -v), 0.0), 3.0);
+  c = mix(c, vec3(0.86, 0.89, 0.95), 0.15 * rim);
+  gl_FragColor = vec4(c * uDim * vec3(0.98, 0.99, 1.01), 1.0);
 }`;
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -333,7 +397,9 @@ export function ChromeChains({ paused = false }: Props) {
     const uSeed = gl.getUniformLocation(prog, 'uSeed');
     const uRough = gl.getUniformLocation(prog, 'uRough');
     const uDim = gl.getUniformLocation(prog, 'uDim');
+    const uTime = gl.getUniformLocation(prog, 'uTime');
 
+    const t0 = Date.now() / 1000; // keeps the shader clock small enough for float precision
     const camZ = 6;
     // View is a pure translation, so projection * view is the projection with a z offset.
     const pv = perspective(0.8, W / H, 0.1, 40);
@@ -399,6 +465,7 @@ export function ChromeChains({ paused = false }: Props) {
 
     drawRef.current = (t: number) => {
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniform1f(uTime, t < 1e6 ? t : t - t0);
       STRANDS.forEach((s, k) => {
         const pitchU = PITCH * s.size;
         const gapU = CARABINER_GAP * s.size;

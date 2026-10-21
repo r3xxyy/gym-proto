@@ -5,6 +5,8 @@ import * as Notifications from 'expo-notifications';
 import {
   Alert,
   AppState,
+  InputAccessoryView,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -20,11 +22,12 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS, withRe
 import { Swipeable, GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ActRow } from '@/components/act-row';
 import { ChromeChains } from '@/components/chrome-chains';
-import { Ink } from '@/constants/theme';
+import { Ink, Legible } from '@/constants/theme';
+import { estimateNetKcal, sessionVolume } from '@/lib/session-stats';
 import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { ALL_BADGES, checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
-import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, PUSH_EXERCISES, LEG_A_EXERCISES, PULL_EXERCISES, SHOULDER_EXERCISES, LEG_B_EXERCISES, SWAP_POOL, W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES, getWeekExercises, SPLIT, WORKOUT_ORDER, WEEK_DAYS, POSTER_NAMES, DAY_TEXT_STYLES, BOXED_DAYS } from '../../constants/programs';
+import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, PUSH_EXERCISES, LEG_A_EXERCISES, PULL_EXERCISES, SHOULDER_EXERCISES, LEG_B_EXERCISES, SWAP_POOL, W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES, getWeekExercises, SPLIT, SPLIT_LABEL, WORKOUT_ORDER, WEEK_DAYS, POSTER_NAMES, DAY_TEXT_STYLES, BOXED_DAYS } from '../../constants/programs';
 
 // Show banners + play sound even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -124,15 +127,6 @@ function getProgressColor(exName: string, targetStr: string, history: HistoryEnt
   if (targetWeight > prevWeight) return '#34C759';
   if (targetWeight < prevWeight) return '#FF3B30';
   return undefined; // same — default colour
-}
-
-function getSetProgressColor(currentWeight: string, prevWeight: string | undefined): string | undefined {
-  const cur = parseFloat(currentWeight);
-  const prev = parseFloat(prevWeight ?? '');
-  if (!cur || !prev) return undefined;
-  if (cur > prev) return '#34C759';
-  if (cur < prev) return '#FF3B30';
-  return undefined; // same
 }
 
 // Parse "Tue, 14 Apr 2026" → timestamp. Strips weekday prefix before calling Date.parse.
@@ -443,7 +437,8 @@ function HistoryExerciseCard({
   editable?: boolean;
   onChange?: (updated: Exercise) => void;
 }) {
-  const displaySets = editable ? exercise.sets : exercise.sets.filter(s => s.weight || s.reps);
+  // Sets that were left unticked in a live session aren't part of what happened.
+  const displaySets = editable ? exercise.sets : exercise.sets.filter(s => s.done !== false && (s.weight || s.reps));
   if (!editable && displaySets.length === 0) return null;
 
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
@@ -452,47 +447,44 @@ function HistoryExerciseCard({
   }
 
   return (
-    <View style={card.container}>
-      <View style={card.header}>
-        <Text style={card.name}>{exercise.name}</Text>
-        <Text style={card.badge}>{exercise.type}</Text>
-      </View>
-      <Text style={card.muscles}>{exercise.muscles}</Text>
-      <Text style={card.target}>Target: {exercise.target}</Text>
+    <View style={hCard.container}>
+      <Text style={hCard.name}>{exercise.name}</Text>
+      <Text style={hCard.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
       {displaySets.map((s, i) => (
-        <View key={i} style={card.setRow}>
-          <Text style={card.setNum}>{i + 1}</Text>
-          {editable ? (
-            <TextInput
-              style={histCard.editInput}
-              value={s.weight}
-              onChangeText={v => updateSet(i, 'weight', v)}
-              keyboardType="decimal-pad"
-              placeholder="kg"
-              placeholderTextColor="#333"
-            />
-          ) : (
-            <Text style={histCard.setValue}>{s.weight || '—'} kg</Text>
-          )}
-          <Text style={card.sep}>×</Text>
-          {editable ? (
-            <TextInput
-              style={histCard.editInput}
-              value={s.reps}
-              onChangeText={v => updateSet(i, 'reps', v)}
-              keyboardType="number-pad"
-              placeholder="reps"
-              placeholderTextColor="#333"
-            />
-          ) : (
-            <Text style={histCard.setValue}>{s.reps || '—'} reps</Text>
-          )}
+        <View key={i} style={hCard.setBlock}>
+          <View style={hCard.setRow}>
+            <Text style={hCard.setNum}>{i + 1}</Text>
+            {editable ? (
+              <>
+                <TextInput
+                  style={hCard.editInput}
+                  value={s.weight}
+                  onChangeText={v => updateSet(i, 'weight', v)}
+                  keyboardType="decimal-pad"
+                  placeholder="kg"
+                  placeholderTextColor={Ink.textFaint}
+                  inputAccessoryViewID={NUMPAD_DONE_ID}
+                />
+                <Text style={hCard.sep}>×</Text>
+                <TextInput
+                  style={hCard.editInput}
+                  value={s.reps}
+                  onChangeText={v => updateSet(i, 'reps', v)}
+                  keyboardType="number-pad"
+                  placeholder="reps"
+                  placeholderTextColor={Ink.textFaint}
+                  inputAccessoryViewID={NUMPAD_DONE_ID}
+                />
+              </>
+            ) : (
+              <Text style={hCard.setValue}>{s.weight || '—'} kg × {s.reps || '—'}</Text>
+            )}
+            {!!s.rpe && <Text style={hCard.rpe}>RPE {s.rpe}</Text>}
+          </View>
           {s.drops.map((d, j) => (
-            <View key={j} style={card.dropGroup}>
-              <Text style={card.arrow}>→</Text>
-              <Text style={histCard.setValue}>{d.weight || '—'} kg</Text>
-              <Text style={card.sep}>×</Text>
-              <Text style={histCard.setValue}>{d.reps || '—'} reps</Text>
+            <View key={j} style={hCard.setRow}>
+              <Text style={hCard.setNum}>↳</Text>
+              <Text style={hCard.setValue}>{d.weight || '—'} kg × {d.reps || '—'}</Text>
             </View>
           ))}
         </View>
@@ -502,13 +494,13 @@ function HistoryExerciseCard({
           style={aCard.notes}
           value={exercise.notes ?? ''}
           onChangeText={text => onChange?.({ ...exercise, notes: text })}
-          placeholder="Notes…"
-          placeholderTextColor="#222"
+          placeholder="Note"
+          placeholderTextColor={Ink.textFaint}
           multiline
         />
       )}
       {!editable && exercise.notes?.trim() ? (
-        <Text style={histCard.noteText}>{exercise.notes.trim()}</Text>
+        <Text style={hCard.note}>{exercise.notes.trim()}</Text>
       ) : null}
     </View>
   );
@@ -526,11 +518,25 @@ const RPE_GUIDE = [
 
 const PLATE_SIZES = [20, 15, 10, 5, 2.5, 1.25];
 
+// The number pads on iOS have no Return key, so every numeric field shares a Next / Done bar.
+const NUMPAD_ID = 'numpad-bar';
+const NUMPAD_DONE_ID = 'numpad-done';
+let numpadNext: (() => void) | null = null;
+
+function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1 | 0 {
+  const cur = parseFloat(currentWeight);
+  const prev = parseFloat(prevWeight ?? '');
+  if (!cur || !prev || cur === prev) return 0;
+  return cur > prev ? 1 : -1;
+}
+
 function ExerciseCard({
   exercise,
   onChange,
   onSwap,
+  onRemove,
   onConfirmSet,
+  onRateSet,
   prevSets,
   prevLabel,
   prevSets2,
@@ -539,17 +545,52 @@ function ExerciseCard({
   exercise: Exercise;
   onChange: (updated: Exercise) => void;
   onSwap?: () => void;
+  onRemove?: () => void;
+  /** Called with the exercise up to and including the set that was just ticked. */
   onConfirmSet?: (exercise: Exercise) => void;
+  /** Called with the exercise up to and including a set that was just given an RPE. */
+  onRateSet?: (exercise: Exercise) => void;
   prevSets?: { weight: string; reps: string }[];
   prevLabel?: string;
   prevSets2?: { weight: string; reps: string }[];
   prevLabel2?: string;
 }) {
-  const [confirmedSets, setConfirmedSets] = useState<Set<number>>(new Set());
+  const [showMenu, setShowMenu] = useState(false);
   const [showPlates, setShowPlates] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [rateOpen, setRateOpen] = useState<number | null>(null);
+  const [undo, setUndo] = useState<{ index: number; set: Exercise['sets'][number] } | null>(null);
   const [barWeight, setBarWeight] = useState('20');
   const [tareWeight, setTareWeight] = useState('0');
   const [showRpeGuide, setShowRpeGuide] = useState(false);
+  // null = follow progress (collapses once every set is ticked); boolean = the user chose
+  const [open, setOpen] = useState<boolean | null>(null);
+  const swipeRefs = useRef<(any | null)[]>([]);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fieldRefs = useRef<(TextInput | null)[]>([]);
+
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+
+  const allDone = exercise.sets.length > 0 && exercise.sets.every(s => s.done);
+  const collapsed = open === null ? allDone : !open;
+  const doneSummary = exercise.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ');
+
+  // Props for each numeric field: registers it so Next can hop to the following one.
+  let slot = 0;
+  const field = () => {
+    const i = slot++;
+    return {
+      ref: (r: TextInput | null) => { fieldRefs.current[i] = r; },
+      onFocus: () => {
+        numpadNext = () => {
+          const next = fieldRefs.current[i + 1];
+          if (next) next.focus(); else Keyboard.dismiss();
+        };
+      },
+      inputAccessoryViewID: NUMPAD_ID,
+      selectTextOnFocus: true,
+    };
+  };
 
   function calcPlates(totalStr: string): string {
     const total = parseFloat(totalStr) || 0;
@@ -571,11 +612,6 @@ function ExerciseCard({
     onChange({ ...exercise, sets, startedAt });
   }
 
-  function updateRpe(si: number, value: string) {
-    const sets = exercise.sets.map((s, i) => i === si ? { ...s, rpe: value } : s);
-    onChange({ ...exercise, sets });
-  }
-
   function updateDrop(si: number, di: number, field: 'weight' | 'reps', value: string) {
     const sets = exercise.sets.map((s, i) =>
       i === si
@@ -588,12 +624,26 @@ function ExerciseCard({
   function addSet() {
     const last = exercise.sets[exercise.sets.length - 1];
     const newDrops = last.drops.map(d => ({ weight: d.weight, reps: d.reps }));
-    onChange({ ...exercise, sets: [...exercise.sets, { weight: last.weight, reps: last.reps, rpe: '', drops: newDrops }] });
+    onChange({ ...exercise, sets: [...exercise.sets, { weight: last.weight, reps: last.reps, rpe: '', drops: newDrops, done: false }] });
   }
 
-  function removeSet(si: number) {
+  function deleteSet(si: number) {
     if (exercise.sets.length === 1) return;
+    const removed = exercise.sets[si];
     onChange({ ...exercise, sets: exercise.sets.filter((_, i) => i !== si) });
+    setRateOpen(null);
+    setUndo({ index: si, set: removed });
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndo(null), 5000);
+  }
+
+  function undoDelete() {
+    if (!undo) return;
+    const sets = [...exercise.sets];
+    sets.splice(Math.min(undo.index, sets.length), 0, undo.set);
+    onChange({ ...exercise, sets });
+    setUndo(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
   }
 
   function addDrop(si: number) {
@@ -610,44 +660,89 @@ function ExerciseCard({
     onChange({ ...exercise, sets });
   }
 
+  function toggleDone(si: number) {
+    if (exercise.sets[si].done) {
+      // tick again to take it back
+      onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false } : s) });
+      setRateOpen(null);
+      return;
+    }
+    Keyboard.dismiss();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    const sets = exercise.sets.map((s, i) => i === si ? { ...s, done: true } : s);
+    onChange({ ...exercise, sets, endedAt: Date.now() });
+    setRateOpen(si);
+    onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
+  }
+
+  function rate(si: number, value: string) {
+    const sets = exercise.sets.map((s, i) => i === si ? { ...s, rpe: s.rpe === value ? '' : value } : s);
+    onChange({ ...exercise, sets });
+    setRateOpen(null);
+    onRateSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
+  }
+
+  if (collapsed) {
+    return (
+      <TouchableOpacity style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
+        <View style={{ flex: 1 }}>
+          <Text style={aCard.collapsedName} numberOfLines={1}>{exercise.name}</Text>
+          {doneSummary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{doneSummary}</Text> : null}
+        </View>
+        <Text style={aCard.collapsedTick}>✓</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  const targetMatch = exercise.target.match(/^(\d+\.?\d*)\s*kg/);
+  const prevMax = prevSets ? Math.max(...prevSets.map(s => parseFloat(s.weight) || 0)) : 0;
+  const targetW = targetMatch ? parseFloat(targetMatch[1]) : 0;
+  const targetDir = prevMax && targetW ? (targetW > prevMax ? '▲ ' : targetW < prevMax ? '▼ ' : '') : '';
+
   return (
     <View style={aCard.container}>
       <View style={aCard.header}>
-        {onSwap ? (
-          <TouchableOpacity onPress={onSwap} style={{ flex: 1 }}>
-            <Text style={aCard.name}>{exercise.name}</Text>
-            <Text style={aCard.swapHint}>tap to swap</Text>
-          </TouchableOpacity>
-        ) : (
+        <TouchableOpacity style={{ flex: 1 }} onPress={() => setOpen(false)} activeOpacity={0.7}>
           <Text style={aCard.name}>{exercise.name}</Text>
-        )}
-        <Text style={aCard.badge}>{exercise.type}</Text>
-        <TouchableOpacity onPress={() => setShowPlates(p => !p)}>
-          <Text style={[aCard.badge, showPlates && { color: '#aaa' }]}>⊞ PLATES</Text>
+          <Text style={aCard.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowMenu(m => !m)} hitSlop={10} style={aCard.menuBtn}>
+          <Text style={[aCard.menuBtnText, showMenu && { color: Ink.text }]}>•••</Text>
         </TouchableOpacity>
       </View>
-      <Text style={aCard.muscles}>{exercise.muscles.split(',')[0].trim()}</Text>
-      {(() => {
-        const prevMax = prevSets ? Math.max(...prevSets.map(s => parseFloat(s.weight) || 0)) : 0;
-        const targetMatch = exercise.target.match(/^(\d+\.?\d*)\s*kg/);
-        const targetW = targetMatch ? parseFloat(targetMatch[1]) : 0;
-        const targetColor = prevMax && targetW ? (targetW > prevMax ? '#34C759' : targetW < prevMax ? '#FF3B30' : undefined) : undefined;
-        return (
-          <>
-            {prevLabel && prevSets && prevSets.some(s => s.weight) && (
-              <Text style={aCard.prevRef}>
-                {prevLabel}{'  '}{prevSets.filter(s => s.weight).map(s => `${s.weight}×${s.reps}`).join(' · ')}
-              </Text>
-            )}
-            {prevLabel2 && prevSets2 && prevSets2.some(s => s.weight) && (
-              <Text style={aCard.prevRef}>
-                {prevLabel2}{'  '}{prevSets2.filter(s => s.weight).map(s => `${s.weight}×${s.reps}`).join(' · ')}
-              </Text>
-            )}
-            <Text style={[aCard.target, targetColor ? { color: targetColor } : undefined]}>↑ {exercise.target}</Text>
-          </>
-        );
-      })()}
+
+      {showMenu && (
+        <View style={aCard.menuRow}>
+          {onSwap && (
+            <TouchableOpacity style={aCard.menuPill} onPress={() => { setShowMenu(false); onSwap(); }}>
+              <Text style={aCard.menuPillText}>Swap</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={aCard.menuPill} onPress={() => setShowPlates(p => !p)}>
+            <Text style={aCard.menuPillText}>Plates</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={aCard.menuPill} onPress={() => setShowNotes(n => !n)}>
+            <Text style={aCard.menuPillText}>Note</Text>
+          </TouchableOpacity>
+          {onRemove && (
+            <TouchableOpacity style={aCard.menuPill} onPress={onRemove}>
+              <Text style={aCard.menuPillText}>Remove</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      <Text style={aCard.target}>{targetDir}{exercise.target}</Text>
+      {prevLabel && prevSets && prevSets.some(s => s.weight) && (
+        <Text style={aCard.prevRef}>
+          {prevLabel}{'  '}{prevSets.filter(s => s.weight).map(s => `${s.weight}×${s.reps}`).join(' · ')}
+        </Text>
+      )}
+      {prevLabel2 && prevSets2 && prevSets2.some(s => s.weight) && (
+        <Text style={aCard.prevRef}>
+          {prevLabel2}{'  '}{prevSets2.filter(s => s.weight).map(s => `${s.weight}×${s.reps}`).join(' · ')}
+        </Text>
+      )}
 
       {showPlates && (() => {
         const displayWeight = exercise.sets.find(s => s.weight)?.weight
@@ -661,8 +756,9 @@ function ExerciseCard({
                 value={barWeight}
                 onChangeText={setBarWeight}
                 keyboardType="decimal-pad"
+                inputAccessoryViewID={NUMPAD_ID}
                 placeholder="20"
-                placeholderTextColor="#333"
+                placeholderTextColor={Ink.textFaint}
               />
               <Text style={aCard.plateLabel}>tare</Text>
               <TextInput
@@ -670,8 +766,9 @@ function ExerciseCard({
                 value={tareWeight}
                 onChangeText={setTareWeight}
                 keyboardType="decimal-pad"
+                inputAccessoryViewID={NUMPAD_ID}
                 placeholder="0"
-                placeholderTextColor="#333"
+                placeholderTextColor={Ink.textFaint}
               />
             </View>
             <Text style={aCard.plateResult}>
@@ -682,101 +779,123 @@ function ExerciseCard({
       })()}
 
       {exercise.sets.map((set, si) => {
-        const isDone = confirmedSets.has(si);
-        const progressColor = getSetProgressColor(set.weight, prevSets?.[si]?.weight);
+        const isDone = !!set.done;
+        const delta = setDelta(set.weight, prevSets?.[si]?.weight);
+        // A set is the top set plus any drops; the tick sits on its last line.
+        const lines = [
+          { weight: set.weight, reps: set.reps, setW: (v: string) => updateSet(si, 'weight', v), setR: (v: string) => updateSet(si, 'reps', v) },
+          ...set.drops.map((d, di) => ({
+            weight: d.weight, reps: d.reps,
+            setW: (v: string) => updateDrop(si, di, 'weight', v), setR: (v: string) => updateDrop(si, di, 'reps', v),
+          })),
+        ];
         return (
-          <View key={si} style={aCard.setRow}>
-            <Text style={[aCard.setNum, isDone ? aCard.setNumConfirmed : progressColor ? { color: progressColor } : null]}>
-              {String(si + 1).padStart(2, '0')}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <View style={aCard.setInner}>
-                {/* Main set */}
-                <TextInput
-                  style={aCard.input}
-                  value={set.weight}
-                  onChangeText={v => updateSet(si, 'weight', v)}
-                  keyboardType="decimal-pad"
-                  placeholder="kg"
-                  placeholderTextColor="#333"
-                />
-                <Text style={aCard.sep}>×</Text>
-                <TextInput
-                  style={aCard.input}
-                  value={set.reps}
-                  onChangeText={v => updateSet(si, 'reps', v)}
-                  keyboardType="number-pad"
-                  placeholder="reps"
-                  placeholderTextColor="#333"
-                />
-                {/* Drop sets */}
-                {set.drops.map((drop, di) => (
-                  <View key={di} style={aCard.dropGroup}>
-                    <Text style={aCard.arrow}>→</Text>
+          <Swipeable
+            key={si}
+            ref={r => { swipeRefs.current[si] = r; }}
+            enabled={exercise.sets.length > 1}
+            friction={1.6}
+            rightThreshold={90}
+            overshootRight={false}
+            renderRightActions={() => (
+              <View style={aCard.swipeDelete}><Text style={aCard.swipeDeleteText}>Delete</Text></View>
+            )}
+            onSwipeableOpen={() => { swipeRefs.current[si]?.close(); deleteSet(si); }}
+          >
+            <View style={aCard.setBlock}>
+              {lines.map((ln, li) => {
+                const last = li === lines.length - 1;
+                return (
+                  <View key={li} style={[aCard.setRow, li > 0 && { marginTop: 8 }]}>
+                    <View style={aCard.setNumWrap}>
+                      {li === 0 ? (
+                        <Text style={[aCard.setNum, isDone && aCard.setNumConfirmed]}>
+                          {si + 1}{delta === 1 ? '▲' : delta === -1 ? '▼' : ''}
+                        </Text>
+                      ) : (
+                        <Text style={aCard.dropArrow}>↳</Text>
+                      )}
+                    </View>
                     <TextInput
-                      style={aCard.input}
-                      value={drop.weight}
-                      onChangeText={v => updateDrop(si, di, 'weight', v)}
+                      style={[aCard.input, isDone && aCard.inputDone]}
+                      value={ln.weight}
+                      onChangeText={ln.setW}
                       keyboardType="decimal-pad"
                       placeholder="kg"
-                      placeholderTextColor="#333"
+                      placeholderTextColor={Ink.textFaint}
+                      {...field()}
                     />
                     <Text style={aCard.sep}>×</Text>
                     <TextInput
-                      style={aCard.input}
-                      value={drop.reps}
-                      onChangeText={v => updateDrop(si, di, 'reps', v)}
+                      style={[aCard.input, isDone && aCard.inputDone]}
+                      value={ln.reps}
+                      onChangeText={ln.setR}
                       keyboardType="number-pad"
                       placeholder="reps"
-                      placeholderTextColor="#333"
+                      placeholderTextColor={Ink.textFaint}
+                      {...field()}
                     />
-                    <TouchableOpacity onPress={() => removeDrop(si, di)}>
-                      <Text style={aCard.dropRemove}>✕</Text>
-                    </TouchableOpacity>
+                    {last ? (
+                      <TouchableOpacity
+                        onPress={() => toggleDone(si)}
+                        style={[aCard.confirmBtn, isDone && aCard.confirmBtnDone]}
+                        accessibilityLabel={isDone ? `Set ${si + 1} done, tap to undo` : `Finish set ${si + 1}`}
+                      >
+                        <Text style={[aCard.confirmBtnText, isDone && aCard.confirmBtnTextDone]}>✓</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={{ width: 48 }} />
+                    )}
                   </View>
-                ))}
-                {/* + Drop */}
-                <TouchableOpacity style={aCard.dropBtn} onPress={() => addDrop(si)}>
-                  <Text style={aCard.dropBtnText}>+ Drop</Text>
-                </TouchableOpacity>
-                {/* RPE */}
-                <Text style={aCard.sep}>@</Text>
-                <TextInput
-                  style={[aCard.input, aCard.rpeInput]}
-                  value={set.rpe}
-                  onChangeText={v => updateRpe(si, v)}
-                  keyboardType="decimal-pad"
-                  placeholder="RPE"
-                  placeholderTextColor="#333"
-                />
-                {si === 0 && (
-                  <TouchableOpacity onPress={() => setShowRpeGuide(p => !p)} style={aCard.rpeGuideBtn}>
-                    <Text style={[aCard.rpeGuideBtnText, showRpeGuide && { color: '#aaa' }]}>?</Text>
+                );
+              })}
+
+              {!isDone && (
+                <View style={aCard.dropLinks}>
+                  <TouchableOpacity onPress={() => addDrop(si)} hitSlop={8}>
+                    <Text style={aCard.moreLink}>+ Drop</Text>
                   </TouchableOpacity>
-                )}
-              </View>
-            </ScrollView>
-            {/* Confirm set */}
-            <TouchableOpacity
-              onPress={() => {
-                setConfirmedSets(prev => new Set([...prev, si]));
-                onChange({ ...exercise, endedAt: Date.now() });
-                onConfirmSet?.(exercise);
-              }}
-              style={[aCard.confirmBtn, isDone && aCard.confirmBtnDone]}
-            >
-              <Text style={[aCard.confirmBtnText, isDone && aCard.confirmBtnTextDone]}>✓</Text>
-            </TouchableOpacity>
-            {/* Remove set */}
-            <TouchableOpacity onPress={() => removeSet(si)} style={aCard.removeBtn}>
-              <Text style={aCard.removeBtnText}>✕</Text>
-            </TouchableOpacity>
-          </View>
+                  {set.drops.length > 0 && (
+                    <TouchableOpacity onPress={() => removeDrop(si, set.drops.length - 1)} hitSlop={8}>
+                      <Text style={aCard.moreLink}>− Drop</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {isDone && rateOpen === si ? (
+                <View style={aCard.rateRow}>
+                  <Text style={aCard.moreLabel}>Effort</Text>
+                  {RPE_GUIDE.map(r => (
+                    <TouchableOpacity key={r.rpe} style={aCard.rateChip} onPress={() => rate(si, r.rpe)} accessibilityLabel={`RPE ${r.rpe}, ${r.label}`}>
+                      <Text style={aCard.rateChipText}>{r.rpe}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity onPress={() => setShowRpeGuide(p => !p)} hitSlop={8}>
+                    <Text style={[aCard.moreLink, showRpeGuide && { color: Ink.text }]}>?</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : isDone && set.rpe ? (
+                <TouchableOpacity style={aCard.rateTag} onPress={() => setRateOpen(si)} hitSlop={8}>
+                  <Text style={aCard.moreLink}>RPE {set.rpe}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </Swipeable>
         );
       })}
 
+      {undo && (
+        <View style={aCard.undoBar}>
+          <Text style={aCard.undoText}>Set deleted</Text>
+          <TouchableOpacity onPress={undoDelete} hitSlop={8}>
+            <Text style={aCard.undoBtn}>Undo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <TouchableOpacity style={aCard.addSet} onPress={addSet}>
-        <Text style={aCard.addSetText}>+ Set</Text>
+        <Text style={aCard.addSetText}>+ Add set</Text>
       </TouchableOpacity>
 
       {showRpeGuide && (
@@ -791,16 +910,16 @@ function ExerciseCard({
         </View>
       )}
 
-      <TextInput
-        style={aCard.notes}
-        value={exercise.notes ?? ''}
-        onChangeText={text => onChange({ ...exercise, notes: text })}
-        placeholder="Notes…"
-        placeholderTextColor="#222"
-        multiline
-      />
-
-      <Text style={aCard.cue}>{exercise.cue}</Text>
+      {(showNotes || !!exercise.notes) && (
+        <TextInput
+          style={aCard.notes}
+          value={exercise.notes ?? ''}
+          onChangeText={text => onChange({ ...exercise, notes: text })}
+          placeholder="Note"
+          placeholderTextColor={Ink.textFaint}
+          multiline
+        />
+      )}
     </View>
   );
 }
@@ -816,6 +935,7 @@ function DraggableCard({
   onRemove,
   onReorder,
   onConfirmSet,
+  onRateSet,
   prevSets,
   prevLabel,
   prevSets2,
@@ -829,6 +949,7 @@ function DraggableCard({
   onRemove: () => void;
   onReorder: (from: number, to: number) => void;
   onConfirmSet?: (exercise: Exercise) => void;
+  onRateSet?: (exercise: Exercise) => void;
   prevSets?: { weight: string; reps: string }[];
   prevLabel?: string;
   prevSets2?: { weight: string; reps: string }[];
@@ -868,14 +989,7 @@ function DraggableCard({
         style={animStyle}
         onLayout={e => { cardHeight.value = e.nativeEvent.layout.height; }}
       >
-        <View style={drag.handle}>
-          <Text style={drag.handleDots}>⠿ ⠿ ⠿</Text>
-          <Text style={drag.handleLabel}>hold to drag</Text>
-          <TouchableOpacity onPress={onRemove} style={drag.removeBtn}>
-            <Text style={drag.removeBtnText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onConfirmSet={onConfirmSet} prevSets={prevSets} prevLabel={prevLabel} prevSets2={prevSets2} prevLabel2={prevLabel2} />
+        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onRemove={onRemove} onConfirmSet={onConfirmSet} onRateSet={onRateSet} prevSets={prevSets} prevLabel={prevLabel} prevSets2={prevSets2} prevLabel2={prevLabel2} />
       </Animated.View>
     </GestureDetector>
   );
@@ -913,16 +1027,13 @@ function HistoryScreen({ history, onBack, onDelete, onMerge, onEditEntry, progra
   onEditEntry: (updated: HistoryEntry) => void;
   programEpoch?: number;
 }) {
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [filter, setFilter] = useState<string>('All');
   const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{ id: string; exercises: Exercise[] } | null>(null);
-
-  function toggleGroup(name: string) {
-    setOpenGroups(prev => ({ ...prev, [name]: !prev[name] }));
-  }
+  const swipeRefs = useRef<Record<string, any>>({});
 
   function toggleDate(key: string) {
     setOpenDates(prev => ({ ...prev, [key]: !prev[key] }));
@@ -940,8 +1051,7 @@ function HistoryScreen({ history, onBack, onDelete, onMerge, onEditEntry, progra
   function enterEditMode(entry: HistoryEntry) {
     setEditingId(entry.id);
     setEditDraft({ id: entry.id, exercises: entry.exercises.map(ex => ({ ...ex, sets: ex.sets.map(s => ({ ...s })) })) });
-    // Force the entry open
-    setOpenDates(prev => ({ ...prev, [`${entry.workoutName}-${entry.id}`]: true }));
+    setOpenDates(prev => ({ ...prev, [entry.id]: true })); // force the entry open
   }
 
   function updateEditDraftExercise(updated: Exercise) {
@@ -972,145 +1082,177 @@ function HistoryScreen({ history, onBack, onDelete, onMerge, onEditEntry, progra
     Share.share({ message: text });
   }
 
-  // Group history by workout name
-  const grouped: Record<string, HistoryEntry[]> = {};
-  for (const entry of history) {
-    if (!grouped[entry.workoutName]) grouped[entry.workoutName] = [];
-    grouped[entry.workoutName].push(entry);
+  function confirmDelete(entry: HistoryEntry) {
+    const label = `${SPLIT_LABEL[WORKOUT_TO_DAY[entry.workoutName]] ?? entry.workoutName}, ${entry.date}`;
+    Alert.alert('Delete this session?', `${label}. This can't be undone.`, [
+      { text: 'Cancel', style: 'cancel', onPress: () => swipeRefs.current[entry.id]?.close() },
+      { text: 'Delete', style: 'destructive', onPress: () => onDelete(entry.id) },
+    ]);
   }
 
-  const categories = [
-    ...WORKOUT_ORDER.filter(name => grouped[name]),
-    ...Object.keys(grouped).filter(name => !WORKOUT_ORDER.includes(name)),
-  ];
+  // Newest first, then grouped into program weeks.
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const sorted = [...history].sort((a, b) => {
+    const d = parseHistoryDate(b.date) - parseHistoryDate(a.date);
+    return d !== 0 ? d : b.id.localeCompare(a.id);
+  });
+  const visible = filter === 'All' ? sorted : sorted.filter(e => e.workoutName === filter && !e.isRestDay);
+  const weeks: { num: number; entries: HistoryEntry[] }[] = [];
+  for (const entry of visible) {
+    const num = Math.floor((parseHistoryDate(entry.date) - programEpoch) / weekMs) + 1;
+    const last = weeks[weeks.length - 1];
+    if (last && last.num === num) last.entries.push(entry);
+    else weeks.push({ num, entries: [entry] });
+  }
+
+  const dayLabel = (date: string) => {
+    const ts = parseHistoryDate(date);
+    return ts ? new Date(ts).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '') : date;
+  };
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#080810' }}>
-      <View style={styles.historyHeader}>
-        <TouchableOpacity onPress={selectMode ? exitSelectMode : onBack}>
-          <Text style={styles.historyBack}>{selectMode ? 'Cancel' : '← Back'}</Text>
+    <View style={{ flex: 1, backgroundColor: Ink.bg }}>
+      <View style={hist2.header}>
+        <TouchableOpacity onPress={selectMode ? exitSelectMode : onBack} hitSlop={10}>
+          <Text style={hist2.back}>{selectMode ? 'Cancel' : '← Back'}</Text>
         </TouchableOpacity>
-        <Text style={styles.historyTitle}>
+        <Text style={hist2.title} numberOfLines={1}>
           {selectMode && selectedIds.length > 0 ? `${selectedIds.length} selected` : 'History'}
         </Text>
         <View style={{ flex: 1 }} />
         {selectMode && selectedIds.length > 0 ? (
-          <TouchableOpacity onPress={shareSelected}>
-            <Text style={{ fontSize: 13, color: '#007AFF', fontWeight: '600' }}>Share</Text>
+          <TouchableOpacity style={hist2.pill} onPress={shareSelected}>
+            <Text style={hist2.pillText}>Share</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity onPress={() => { setSelectMode(v => !v); setSelectedIds([]); }}>
-            <Text style={{ fontSize: 13, color: '#007AFF' }}>{selectMode ? 'Done' : 'Select'}</Text>
+          <TouchableOpacity style={hist2.pill} onPress={() => { setSelectMode(v => !v); setSelectedIds([]); }}>
+            <Text style={hist2.pillText}>{selectMode ? 'Done' : 'Select'}</Text>
           </TouchableOpacity>
         )}
       </View>
+
       {history.length === 0 ? (
         <View style={styles.center}>
-          <Text style={{ color: '#999' }}>No workouts logged yet.</Text>
+          <Text style={hist2.emptyTitle}>No workouts yet</Text>
+          <Text style={hist2.emptyText}>Finish a session and it shows up here.</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-          {categories.map(name => (
-            <View key={name} style={coll.group}>
-              {/* Group header */}
-              <TouchableOpacity style={coll.groupHeader} onPress={() => toggleGroup(name)}>
-                <Text style={coll.groupName}>{name}</Text>
-                <Text style={coll.chevron}>{openGroups[name] ? '▲' : '▼'}</Text>
-              </TouchableOpacity>
+        <>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={hist2.chipScroll} contentContainerStyle={hist2.chipRow}>
+            {['All', ...WORKOUT_ORDER].map(name => {
+              const on = filter === name;
+              const day = WORKOUT_TO_DAY[name];
+              return (
+                <TouchableOpacity key={name} style={[hist2.chip, on && hist2.chipOn]} onPress={() => setFilter(name)}>
+                  <Text style={[hist2.chipText, on && hist2.chipTextOn]}>{name === 'All' ? 'All' : SPLIT_LABEL[day] ?? name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
 
-              {openGroups[name] && grouped[name].map(entry => {
-                const dateKey = `${name}-${entry.id}`;
-                return (
-                  <Swipeable
-                    key={entry.id}
-                    renderRightActions={selectMode ? undefined : () => (
-                      <TouchableOpacity style={coll.deleteBtn} onPress={() => onDelete(entry.id)}>
-                        <Text style={coll.deleteBtnText}>Delete</Text>
-                      </TouchableOpacity>
-                    )}
-                  >
-                    {/* Date row */}
-                    {(() => {
-                      const isEditing = editingId === entry.id;
-                      return (
-                        <TouchableOpacity
-                          style={[coll.dateRow, selectMode && selectedIds.includes(entry.id) && coll.dateRowSelected]}
-                          onPress={() => isEditing ? undefined : selectMode ? toggleSelect(entry.id) : toggleDate(dateKey)}
-                          activeOpacity={isEditing ? 1 : 0.7}
-                        >
-                          {selectMode && !isEditing && (
-                            <View style={[coll.selectCircle, selectedIds.includes(entry.id) && coll.selectCircleFilled]}>
-                              {selectedIds.includes(entry.id) && <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>✓</Text>}
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            {weeks.length === 0 && <Text style={hist2.emptyText}>No sessions for this workout yet.</Text>}
+            {weeks.map(week => {
+              const trained = week.entries.filter(e => !e.isRestDay);
+              const volume = trained.reduce((t, e) => t + sessionVolume(e.exercises), 0);
+              return (
+                <View key={week.num} style={hist2.week}>
+                  <View style={hist2.weekHead}>
+                    <Text style={hist2.weekTitle}>{week.num >= 1 ? `Week ${week.num}` : 'Earlier'}</Text>
+                    <Text style={hist2.weekMeta}>
+                      {trained.length} session{trained.length === 1 ? '' : 's'}{volume > 0 ? `  ·  ${volume.toLocaleString()} kg` : ''}
+                    </Text>
+                  </View>
+
+                  {week.entries.map(entry => {
+                    const isEditing = editingId === entry.id;
+                    const label = SPLIT_LABEL[WORKOUT_TO_DAY[entry.workoutName]] ?? entry.workoutName;
+                    const sibling = !entry.isRestDay
+                      ? week.entries.find(e => e.id !== entry.id && e.date === entry.date && e.workoutName === entry.workoutName)
+                      : undefined;
+                    return (
+                      <Swipeable
+                        key={entry.id}
+                        ref={r => { swipeRefs.current[entry.id] = r; }}
+                        overshootRight={false}
+                        renderRightActions={selectMode ? undefined : () => (
+                          <TouchableOpacity style={hist2.deleteBtn} onPress={() => confirmDelete(entry)}>
+                            <Text style={hist2.deleteText}>Delete</Text>
+                          </TouchableOpacity>
+                        )}
+                      >
+                        <View style={hist2.session}>
+                          <TouchableOpacity
+                            style={hist2.sessionRow}
+                            disabled={!!entry.isRestDay && !selectMode}
+                            onPress={() => isEditing ? undefined : selectMode ? toggleSelect(entry.id) : toggleDate(entry.id)}
+                            activeOpacity={isEditing ? 1 : 0.7}
+                          >
+                            {selectMode && !isEditing && (
+                              <View style={[hist2.selectCircle, selectedIds.includes(entry.id) && hist2.selectCircleOn]}>
+                                {selectedIds.includes(entry.id) && <Text style={hist2.selectTick}>✓</Text>}
+                              </View>
+                            )}
+                            <View style={{ flex: 1 }}>
+                              <Text style={hist2.sessionDate}>{dayLabel(entry.date)}</Text>
+                              <Text style={hist2.sessionName}>
+                                {entry.isRestDay ? 'Rest day' : label}{entry.gym ? `  ·  ${shortGym(entry.gym)}` : ''}
+                              </Text>
                             </View>
-                          )}
-                          <View style={{ flex: 1 }}>
-                            <Text style={coll.dateText}>{entry.date}</Text>
-                            {entry.gym && <Text style={coll.dateGym}>{shortGym(entry.gym)}</Text>}
-                          </View>
-                          {isEditing ? (
-                            <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-                              <TouchableOpacity onPress={() => saveEdit(entry)}>
-                                <Text style={{ fontSize: 11, letterSpacing: 2, color: '#34C759' }}>SAVE</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity onPress={cancelEdit}>
-                                <Text style={{ fontSize: 11, letterSpacing: 2, color: '#FF3B30' }}>✕</Text>
-                              </TouchableOpacity>
-                            </View>
-                          ) : (
-                            <>
-                              <Text style={coll.dateMeta}>{formatTime(entry.duration + entry.restTime)}</Text>
-                              {!selectMode && (
-                                <TouchableOpacity
-                                  onPress={() => enterEditMode(entry)}
-                                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                  style={{ paddingHorizontal: 6 }}
-                                >
-                                  <Text style={{ color: '#333', fontSize: 14 }}>✎</Text>
+                            {isEditing ? (
+                              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                                <TouchableOpacity style={hist2.pill} onPress={() => saveEdit(entry)}>
+                                  <Text style={hist2.pillText}>Save</Text>
                                 </TouchableOpacity>
-                              )}
-                              {!selectMode && <Text style={coll.chevronSm}>{openDates[dateKey] ? '▲' : '▼'}</Text>}
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })()}
+                                <TouchableOpacity style={hist2.pillQuiet} onPress={cancelEdit}>
+                                  <Text style={hist2.pillQuietText}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : !entry.isRestDay ? (
+                              <>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                  <Text style={hist2.sessionTime}>{formatTime(entry.duration + entry.restTime)}</Text>
+                                  <Text style={hist2.sessionVol}>{sessionVolume(entry.exercises).toLocaleString()} kg</Text>
+                                </View>
+                                {!selectMode && (
+                                  <TouchableOpacity onPress={() => enterEditMode(entry)} hitSlop={10} style={hist2.editBtn} accessibilityLabel="Edit session">
+                                    <Text style={hist2.editText}>Edit</Text>
+                                  </TouchableOpacity>
+                                )}
+                              </>
+                            ) : null}
+                          </TouchableOpacity>
 
-                    {/* Exercise cards */}
-                    {openDates[dateKey] && (
-                      <View style={coll.cardList}>
-                        {(editingId === entry.id && editDraft ? editDraft.exercises : entry.exercises).map(ex => (
-                          <HistoryExerciseCard
-                            key={ex.id}
-                            exercise={ex}
-                            editable={editingId === entry.id}
-                            onChange={editingId === entry.id ? updateEditDraftExercise : undefined}
-                          />
-                        ))}
-                        {/* Merge button — shown when another same-day same-workout entry exists */}
-                        {(() => {
-                          const sibling = grouped[name].find(
-                            e => e.id !== entry.id && e.date === entry.date
-                          );
-                          if (!sibling) return null;
-                          const older = entry.id < sibling.id ? entry : sibling;
-                          const newer = entry.id < sibling.id ? sibling : entry;
-                          return (
-                            <TouchableOpacity
-                              style={[coll.mergeBtn]}
-                              onPress={() => onMerge(mergeEntries(older, newer), newer.id)}
-                            >
-                              <Text style={coll.mergeBtnText}>Merge sessions →</Text>
-                            </TouchableOpacity>
-                          );
-                        })()}
-                      </View>
-                    )}
-                  </Swipeable>
-                );
-              })}
-            </View>
-          ))}
-        </ScrollView>
+                          {openDates[entry.id] && !entry.isRestDay && (
+                            <View style={hist2.cardList}>
+                              {(isEditing && editDraft ? editDraft.exercises : entry.exercises).map(ex => (
+                                <HistoryExerciseCard
+                                  key={ex.id}
+                                  exercise={ex}
+                                  editable={isEditing}
+                                  onChange={isEditing ? updateEditDraftExercise : undefined}
+                                />
+                              ))}
+                              {sibling && (() => {
+                                const older = entry.id < sibling.id ? entry : sibling;
+                                const newer = entry.id < sibling.id ? sibling : entry;
+                                return (
+                                  <TouchableOpacity style={hist2.mergeBtn} onPress={() => onMerge(mergeEntries(older, newer), newer.id)}>
+                                    <Text style={hist2.mergeText}>Merge with the other session that day</Text>
+                                  </TouchableOpacity>
+                                );
+                              })()}
+                            </View>
+                          )}
+                        </View>
+                      </Swipeable>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </ScrollView>
+        </>
       )}
     </View>
   );
@@ -1132,14 +1274,7 @@ function formatSessionForCoach(
   gym?: string,
   epoch = PROGRAM_EPOCH,
 ): string {
-  const totalVolume = exs.reduce((total, ex) =>
-    total + ex.sets.reduce((s, set) => {
-      const w = parseFloat(set.weight) || 0;
-      const r = parseInt(set.reps) || 0;
-      const dropVol = set.drops.reduce((dv, d) =>
-        dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
-      return s + w * r + dropVol;
-    }, 0), 0);
+  const totalVolume = sessionVolume(exs);
 
   const lines: string[] = [`WORKOUT: ${workoutName}`, `DATE: ${date}`];
   if (gym) lines.push(`VENUE: ${gym}`);
@@ -1151,8 +1286,8 @@ function formatSessionForCoach(
   if (bodyweight && duration) {
     const bw = parseFloat(bodyweight);
     if (!isNaN(bw)) {
-      const kcal = Math.round(5 * bw * (duration / 3600));
-      lines.push(`BODYWEIGHT: ${bodyweight} kg  |  EST. KCAL: ${kcal} kcal`);
+      const kcal = estimateNetKcal(bw, duration, restTime);
+      lines.push(`BODYWEIGHT: ${bodyweight} kg  |  EST. NET KCAL: ${kcal} kcal`);
     }
   }
 
@@ -1209,15 +1344,7 @@ function formatSessionForCoach(
 
 function formatWeekForCoach(weekEntries: HistoryEntry[]): string {
   const trainEntries = weekEntries.filter(e => !e.isRestDay);
-  const totalVolume = trainEntries.reduce((total, entry) =>
-    total + entry.exercises.reduce((ev, ex) =>
-      ev + ex.sets.reduce((s, set) => {
-        const w = parseFloat(set.weight) || 0;
-        const r = parseInt(set.reps) || 0;
-        const dropVol = set.drops.reduce((dv, d) =>
-          dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
-        return s + w * r + dropVol;
-      }, 0), 0), 0);
+  const totalVolume = trainEntries.reduce((total, entry) => total + sessionVolume(entry.exercises), 0);
 
   const totalActive = trainEntries.reduce((t, e) => t + e.duration, 0);
   const totalRest = trainEntries.reduce((t, e) => t + e.restTime, 0);
@@ -1930,21 +2057,30 @@ export default function HomeScreen() {
     }, restDuration * 1000);
   }
 
-  function extendRest(extraSecs: number) {
+  /** Moves the end of the current rest, keeping the time already rested. */
+  function retargetRest(newDuration: number) {
+    if (!paused || currentRestDuration === 0 || newDuration === currentRestDuration) return;
     if (hapticTimer.current) clearTimeout(hapticTimer.current);
+    if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
     cancelRestNotifications();
     const elapsed = Math.round((Date.now() - restStartRef.current) / 1000);
-    setCurrentRestDuration(prev => {
-      const newDuration = prev + extraSecs;
-      const remaining = newDuration - elapsed;
-      if (remaining > 5) {
-        hapticTimer.current = setTimeout(() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        }, (remaining - 5) * 1000);
-      }
+    const remaining = newDuration - elapsed;
+    setCurrentRestDuration(newDuration);
+    if (remaining > 5) {
+      hapticTimer.current = setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      }, (remaining - 5) * 1000);
+    }
+    if (remaining > 0) {
       scheduleRestNotifications(remaining);
-      return newDuration;
-    });
+      autoResumeTimer.current = setTimeout(() => {
+        if (isAppActiveRef.current) resumeFromRest();
+      }, remaining * 1000);
+    }
+  }
+
+  function extendRest(extraSecs: number) {
+    retargetRest(currentRestDuration + extraSecs);
   }
 
   function reorderExercise(from: number, to: number) {
@@ -1971,13 +2107,16 @@ export default function HomeScreen() {
     if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
     if (hapticTimer.current) clearTimeout(hapticTimer.current);
     cancelRestNotifications();
+    // Freeze each set's ticked state so sets that were never finished don't count towards volume.
+    const finished = exercises.map(ex => ({ ...ex, sets: ex.sets.map(set => ({ ...set, done: set.done === true })) }));
+    setExercises(finished);
     const entry: HistoryEntry = {
       id: pendingEntry?.id ?? Date.now().toString(),
       date: pendingEntry?.date ?? new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
       workoutName: selectedDay !== null ? SPLIT[selectedDay] : todayWorkout,
       duration: finalActive,
       restTime: finalRest_,
-      exercises: exercises,
+      exercises: finished,
       gym: activeGym || undefined,
     };
     setPendingEntry(entry);
@@ -2298,12 +2437,40 @@ export default function HomeScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <View style={styles.root}>
+      {Platform.OS === 'ios' && (
+        <>
+          <InputAccessoryView nativeID={NUMPAD_ID}>
+            <View style={styles.numpadBar}>
+              <TouchableOpacity onPress={() => numpadNext?.()} hitSlop={8}>
+                <Text style={styles.numpadBtn}>Next</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={8}>
+                <Text style={[styles.numpadBtn, { fontWeight: '800' }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+          <InputAccessoryView nativeID={NUMPAD_DONE_ID}>
+            <View style={[styles.numpadBar, { justifyContent: 'flex-end' }]}>
+              <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={8}>
+                <Text style={[styles.numpadBtn, { fontWeight: '800' }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+        </>
+      )}
       {/* ── Home ── */}
       {screen === 'home' && (
         <View style={{ flex: 1, backgroundColor: Ink.bg }}>
           {/* ── Chrome chains — fill the screen behind the type ── */}
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <ChromeChains />
+          </View>
+          {/* Dims the chrome behind the type: a flat veil plus a ramp that deepens towards the lineup. */}
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(9,9,14,0.08)' }]} />
+          <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '75%' }}>
+            {Array.from({ length: 15 }, (_, i) => (
+              <View key={i} style={{ flex: 1, backgroundColor: `rgba(9,9,14,${(0.03 * i).toFixed(3)})` }} />
+            ))}
           </View>
           {selectedDay === null && (
             <View pointerEvents="none" style={poster.sideTag}>
@@ -2413,7 +2580,7 @@ export default function HomeScreen() {
                         style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? Ink.textFaint : Ink.text }]}
                       />
                     </View>
-                    <Text style={poster.headlinerSub}>{SPLIT[headlineDay]}</Text>
+                    <Text style={poster.headlinerSub}>{SPLIT_LABEL[headlineDay]}</Text>
                   </TouchableOpacity>
 
                   {/* ── Setlist ── */}
@@ -2625,41 +2792,55 @@ export default function HomeScreen() {
 
       {/* ── Active ── */}
       {screen === 'active' && (
-        <View style={{ flex: 1, backgroundColor: '#080810' }}>
+        <View style={{ flex: 1, backgroundColor: Ink.bg }}>
           <View style={styles.timerBar}>
-            <TouchableOpacity onLongPress={resetClock} delayLongPress={600} activeOpacity={1}>
-              <Text style={styles.timerBarTime}>{formatTime(totalSessionSecs)}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'active'; setScreen('history'); }}>
-              <Text style={poster.histBtnText}>HISTORY</Text>
-            </TouchableOpacity>
-            {paused ? (
-              <Text style={[styles.timerBarRest, currentRestDuration > 0 && currentRestSecs >= currentRestDuration && { color: '#FF9500' }]}>
-                {currentRestDuration > 0
-                  ? currentRestSecs >= currentRestDuration
-                    ? `+${Math.floor((currentRestSecs - currentRestDuration) / 60)}:${String((currentRestSecs - currentRestDuration) % 60).padStart(2, '0')}`
-                    : `Rest — ${formatTime(currentRestDuration - currentRestSecs)} left`
-                  : `Rest ${formatTime(currentRestSecs)}`}
-              </Text>
-            ) : (
-              <Text style={styles.timerBarRest}>Active {formatTime(seconds)}</Text>
-            )}
-            <Animated.View style={[continueAnimStyle, { alignSelf: 'stretch' }]}>
-              <TouchableOpacity style={[styles.restBtn, isOvertime && { backgroundColor: '#FF3B30', borderColor: '#FF3B30' }]} onPress={toggleRest}>
-                <Text style={[styles.restBtnText, isOvertime && { color: '#fff' }]}>{paused ? 'Continue' : 'Rest'}</Text>
+            <View style={styles.timerTop}>
+              <TouchableOpacity onLongPress={resetClock} delayLongPress={600} activeOpacity={1} style={{ flex: 1 }}>
+                <Text style={styles.timerBarTitle} numberOfLines={1}>{SPLIT_LABEL[WORKOUT_TO_DAY[todayWorkout]] ?? todayWorkout}</Text>
+                <Text style={styles.timerBarTime}>{formatTime(totalSessionSecs)}</Text>
               </TouchableOpacity>
-            </Animated.View>
-            {paused && currentRestDuration > 0 && (
-              <View style={styles.extendRestRow}>
-                <TouchableOpacity style={styles.extendRestBtn} onPress={() => extendRest(30)}>
-                  <Text style={styles.extendRestBtnText}>+30s</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.extendRestBtn} onPress={() => extendRest(60)}>
-                  <Text style={styles.extendRestBtnText}>+60s</Text>
+              <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'active'; setScreen('history'); }}>
+                <Text style={poster.histBtnText}>History</Text>
+              </TouchableOpacity>
+            </View>
+            {paused ? (
+              <View style={styles.restPanel}>
+                <Text style={[styles.restBig, isOvertime && { color: '#FF9500' }]}>
+                  {currentRestDuration > 0
+                    ? isOvertime
+                      ? `+${formatTime(currentRestSecs - currentRestDuration)}`
+                      : formatTime(currentRestDuration - currentRestSecs)
+                    : formatTime(currentRestSecs)}
+                </Text>
+                <Text style={styles.restCaption}>
+                  {currentRestDuration > 0 ? (isOvertime ? 'over your rest' : 'rest left') : 'resting'}
+                </Text>
+                <View style={styles.restActions}>
+                  {currentRestDuration > 0 && (
+                    <>
+                      <TouchableOpacity style={styles.extendRestBtn} onPress={() => extendRest(30)}>
+                        <Text style={styles.extendRestBtnText}>+30s</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.extendRestBtn} onPress={() => extendRest(60)}>
+                        <Text style={styles.extendRestBtnText}>+60s</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <Animated.View style={[continueAnimStyle, { flex: 1.4 }]}>
+                    <TouchableOpacity style={styles.continueBtn} onPress={toggleRest}>
+                      <Text style={styles.continueBtnText}>Continue</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.activeRow}>
+                <Text style={styles.activeText}>Active {formatTime(seconds)}</Text>
+                <TouchableOpacity style={styles.restBtn} onPress={toggleRest}>
+                  <Text style={styles.restBtnText}>Rest</Text>
                 </TouchableOpacity>
               </View>
             )}
-            <Text style={styles.timerBarTitle}>{todayWorkout}</Text>
           </View>
           {/* ── Venue row — reactive: changing gym updates all prev refs inline ── */}
           <View style={[poster.venueRow, { paddingHorizontal: 16 }]}>
@@ -2691,7 +2872,7 @@ export default function HomeScreen() {
           </View>
 
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             {exercises.map((ex, idx) => {
               const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, todayWorkout, history, activeGym);
               const mkLabel = (r: PrevRef) => r.crossGym && r.gym ? `↗ ${shortGym(r.gym)} · ${shortDate(r.date)}` : shortDate(r.date);
@@ -2710,6 +2891,7 @@ export default function HomeScreen() {
                 onConfirmSet={(ex) => {
                   startFreshRest(getRestDuration(ex));
                 }}
+                onRateSet={(ex) => retargetRest(getRestDuration(ex))}
                 prevSets={pi?.sets}
                 prevLabel={pi ? mkLabel(pi) : undefined}
                 prevSets2={si?.sets}
@@ -2718,10 +2900,10 @@ export default function HomeScreen() {
               );
             })}
             <TouchableOpacity style={styles.addExBtn} onPress={() => setActiveSwapId('__add__')}>
-              <Text style={styles.addExBtnText}>+ Add Exercise</Text>
+              <Text style={styles.addExBtnText}>+ Add exercise</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.endBtn} onPress={endWorkout}>
-              <Text style={styles.endBtnText}>End Workout</Text>
+              <Text style={styles.endBtnText}>Finish workout</Text>
             </TouchableOpacity>
           </ScrollView>
           </KeyboardAvoidingView>
@@ -2801,79 +2983,81 @@ export default function HomeScreen() {
 
       {/* ── Summary ── */}
       {screen === 'summary' && (
-        <View style={{ flex: 1, backgroundColor: '#080810' }}>
+        <View style={{ flex: 1, backgroundColor: Ink.bg }}>
           <View style={styles.historyHeader}>
-            <Text style={styles.historyTitle}>Summary</Text>
+            <Text style={styles.historyTitle}>Workout done</Text>
           </View>
-          <ScrollView contentContainerStyle={styles.list}>
-            <Text style={styles.summaryLabel}>Session Duration</Text>
-            <Text style={styles.summaryValue}>{formatTime(finalSeconds + finalRest)}</Text>
-            <Text style={styles.summaryLabel}>Workout Time</Text>
-            <Text style={styles.summaryValue}>{formatTime(finalSeconds)}</Text>
-            <Text style={styles.summaryLabel}>Total Rest</Text>
-            <Text style={styles.summaryValue}>{formatTime(finalRest)}</Text>
+          <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            <View style={sum2.hero}>
+              <Text style={sum2.heroLabel}>Total volume</Text>
+              <Text style={sum2.heroValue}>{sessionVolume(exercises).toLocaleString()}<Text style={sum2.heroUnit}> kg</Text></Text>
+            </View>
 
-            <Text style={styles.summaryLabel}>Total Volume</Text>
-            <Text style={styles.summaryValue}>
-              {exercises.reduce((total, ex) =>
-                total + ex.sets.reduce((s, set) => {
-                  const w = parseFloat(set.weight) || 0;
-                  const r = parseInt(set.reps) || 0;
-                  const dropVol = set.drops.reduce((dv, d) =>
-                    dv + (parseFloat(d.weight) || 0) * (parseInt(d.reps) || 0), 0);
-                  return s + w * r + dropVol;
-                }, 0), 0).toLocaleString()} kg
-            </Text>
+            <View style={sum2.grid}>
+              <View style={sum2.cell}>
+                <Text style={sum2.cellLabel}>Session</Text>
+                <Text style={sum2.cellValue}>{formatTime(finalSeconds + finalRest)}</Text>
+              </View>
+              <View style={sum2.cell}>
+                <Text style={sum2.cellLabel}>Lifting</Text>
+                <Text style={sum2.cellValue}>{formatTime(finalSeconds)}</Text>
+              </View>
+              <View style={sum2.cell}>
+                <Text style={sum2.cellLabel}>Resting</Text>
+                <Text style={sum2.cellValue}>{formatTime(finalRest)}</Text>
+              </View>
+              <View style={sum2.cell}>
+                <Text style={sum2.cellLabel}>Est. net kcal</Text>
+                <Text style={sum2.cellValue}>
+                  {!!bodyweight && !!finalSeconds ? estimateNetKcal(parseFloat(bodyweight), finalSeconds, finalRest) : '—'}
+                </Text>
+              </View>
+            </View>
 
-            <Text style={styles.summaryLabel}>Bodyweight (kg)</Text>
+            <Text style={sum2.fieldLabel}>Bodyweight (kg), used for the kcal estimate</Text>
             <TextInput
-              style={[styles.button, { backgroundColor: '#0e0e1c', borderWidth: 1, borderColor: '#1e1e30', color: '#fff', fontSize: 16, textAlign: 'center', marginBottom: 0 }]}
+              style={sum2.field}
               value={bodyweight}
               onChangeText={v => {
                 setBodyweight(v);
                 FileSystem.writeAsStringAsync(BW_PATH, JSON.stringify(v));
               }}
               keyboardType="decimal-pad"
+              inputAccessoryViewID={NUMPAD_DONE_ID}
               placeholder="e.g. 80"
-              placeholderTextColor="#ccc"
+              placeholderTextColor={Ink.textFaint}
             />
-            {!!bodyweight && !!finalSeconds && (
+
+            {exercises.some(ex => ex.startedAt && ex.endedAt) && (
               <>
-                <Text style={styles.summaryLabel}>Est. Kcal Burned</Text>
-                <Text style={styles.summaryValue}>
-                  {Math.round(5 * parseFloat(bodyweight) * (finalSeconds / 3600))} kcal
-                </Text>
+                <Text style={[sum2.fieldLabel, { marginTop: 24 }]}>Time per exercise</Text>
+                {exercises
+                  .filter(ex => ex.startedAt && ex.endedAt)
+                  .map(ex => (
+                    <View key={ex.id} style={summ.exRow}>
+                      <Text style={summ.exName}>{ex.name}</Text>
+                      <Text style={summ.exTime}>
+                        {formatTime(Math.round(((ex.endedAt ?? 0) - (ex.startedAt ?? 0)) / 1000))}
+                      </Text>
+                    </View>
+                  ))}
               </>
             )}
 
-            <Text style={[styles.summaryLabel, { marginTop: 16 }]}>Exercise Times</Text>
-            {exercises
-              .filter(ex => ex.startedAt && ex.endedAt)
-              .map(ex => (
-                <View key={ex.id} style={summ.exRow}>
-                  <Text style={summ.exName}>{ex.name}</Text>
-                  <Text style={summ.exTime}>
-                    {formatTime(Math.round(((ex.endedAt ?? 0) - (ex.startedAt ?? 0)) / 1000))}
-                  </Text>
-                </View>
-              ))}
-
+            <TouchableOpacity style={sum2.primary} onPress={reset}>
+              <Text style={sum2.primaryText}>Done</Text>
+            </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.button, { marginTop: 24, backgroundColor: '#080810' }]}
+              style={sum2.secondary}
               onPress={() => {
                 const date = pendingEntry?.date ?? new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
                 Share.share({ message: formatSessionForCoach(pendingEntry?.workoutName ?? todayWorkout, date, finalSeconds, finalRest, exercises, bodyweight, history, activeGym || undefined, programEpoch) });
               }}
             >
-              <Text style={styles.buttonText}>Coach This →</Text>
+              <Text style={sum2.secondaryText}>Coach this session</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.button, { marginTop: 12, backgroundColor: '#0e0e1c', borderWidth: 1, borderColor: '#1e1e30' }]} onPress={continueWorkout}>
-              <Text style={[styles.buttonText, { color: '#aaa' }]}>+ Continue Session</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.button, { marginTop: 8, backgroundColor: '#080810' }]} onPress={reset}>
-              <Text style={[styles.buttonText, { color: '#444' }]}>Done</Text>
+            <TouchableOpacity style={sum2.secondary} onPress={continueWorkout}>
+              <Text style={sum2.secondaryText}>Keep going</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -2930,99 +3114,141 @@ const styles = StyleSheet.create({
   timerBar: {
     backgroundColor: Ink.bg,
     paddingTop: 60,
-    paddingBottom: 16,
+    paddingBottom: 14,
     paddingHorizontal: 20,
-    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: Ink.line,
-    gap: 6,
+    gap: 12,
   },
-  timerBarTitle: { fontSize: 11, color: Ink.textFaint, marginTop: 4, fontWeight: '700' },
-  timerBarTime: { fontSize: 42, fontWeight: '200', color: '#fff' },
-  timerBarRest: { fontSize: 13, color: Ink.textFaint },
-  restBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, marginTop: 4, alignSelf: 'stretch', alignItems: 'center' },
+  timerTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  timerBarTitle: { fontFamily: 'Unbounded_500Medium', fontSize: 13, color: Ink.textDim },
+  timerBarTime: { fontFamily: 'Unbounded_700Bold', fontSize: 28, color: Ink.text, marginTop: 2, fontVariant: ['tabular-nums'] },
+  activeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  activeText: { fontSize: 14, color: Ink.textFaint, fontVariant: ['tabular-nums'] },
+  restBtn: { borderWidth: 1, borderColor: Ink.text, paddingVertical: 10, paddingHorizontal: 28, borderRadius: 999, alignItems: 'center' },
   restBtnText: { fontSize: 14, fontWeight: '600', color: Ink.text },
-  extendRestRow: { flexDirection: 'row', gap: 8, marginTop: 6, alignSelf: 'stretch' },
-  extendRestBtn: { flex: 1, borderWidth: 1, borderColor: Ink.line, paddingVertical: 8, borderRadius: 4, alignItems: 'center' },
-  extendRestBtnText: { fontSize: 13, fontWeight: '500', color: Ink.textFaint },
-  endBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
-  endBtnText: { fontSize: 13, color: Ink.textFaint, textAlign: 'center', },
-  addExBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
-  addExBtnText: { fontSize: 13, color: Ink.textFaint, },
+  restPanel: { alignItems: 'center', backgroundColor: Ink.raised, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14 },
+  restBig: { fontFamily: 'Unbounded_700Bold', fontSize: 52, color: Ink.text, fontVariant: ['tabular-nums'] },
+  restCaption: { fontSize: 13, color: Ink.textFaint, marginTop: 2 },
+  restActions: { flexDirection: 'row', gap: 8, marginTop: 14, alignSelf: 'stretch' },
+  extendRestBtn: { flex: 1, borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 999, alignItems: 'center' },
+  extendRestBtnText: { fontSize: 14, fontWeight: '500', color: Ink.textDim },
+  continueBtn: { backgroundColor: Ink.text, paddingVertical: 13, borderRadius: 999, alignItems: 'center' },
+  continueBtnText: { fontSize: 14, fontWeight: '700', color: Ink.bg },
+  numpadBar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: Ink.raised, borderTopWidth: 1, borderTopColor: Ink.line },
+  numpadBtn: { fontSize: 17, fontWeight: '600', color: Ink.text },
+  endBtn: { backgroundColor: Ink.text, paddingVertical: 16, borderRadius: 999, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
+  endBtnText: { fontSize: 15, fontWeight: '700', color: Ink.bg, textAlign: 'center' },
+  addExBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
+  addExBtnText: { fontSize: 14, color: Ink.textDim },
   list: { padding: 16, paddingBottom: 32 },
-  summaryLabel: { fontSize: 11, color: Ink.textFaint, },
-  summaryValue: { fontSize: 36, fontWeight: '200', marginBottom: 8, color: '#fff' },
   homeHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   homeFooter: { padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee' },
   historyBtn: { paddingVertical: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: Ink.line, borderRadius: 4 },
   historyBtnText: { fontSize: 13, color: Ink.textFaint },
   historyHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: Ink.bg, borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', alignItems: 'center', gap: 16 },
   historyBack: { fontSize: 16, color: Ink.textFaint },
-  historyTitle: { fontSize: 16, fontWeight: '700', color: '#fff', },
+  historyTitle: { fontFamily: 'Unbounded_700Bold', fontSize: 20, color: Ink.text },
 });
 
-const hist = StyleSheet.create({
-  sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, marginTop: 8 },
-  workoutName: { fontSize: 16, fontWeight: '600' },
-  date: { fontSize: 12, color: Ink.textDim },
-  meta: { fontSize: 12, color: Ink.textDim, marginBottom: 10 },
+const hist2 = StyleSheet.create({
+  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  back: { fontSize: 16, color: Ink.textDim },
+  title: { fontFamily: 'Unbounded_700Bold', fontSize: 20, color: Ink.text },
+  pill: { minHeight: 36, paddingHorizontal: 18, justifyContent: 'center', borderWidth: 1, borderColor: Ink.text, borderRadius: 18 },
+  pillText: { fontSize: 14, fontWeight: '600', color: Ink.text },
+  pillQuiet: { minHeight: 36, paddingHorizontal: 12, justifyContent: 'center' },
+  pillQuietText: { fontSize: 14, color: Ink.textDim },
+  emptyTitle: { fontFamily: 'Unbounded_700Bold', fontSize: 20, color: Ink.text, textAlign: 'center' },
+  emptyText: { fontSize: 15, color: Ink.textDim, textAlign: 'center', marginTop: 8 },
+  chipScroll: { flexGrow: 0, flexShrink: 0, height: 54 },
+  chipRow: { paddingHorizontal: 16, paddingVertical: 9, gap: 8, alignItems: 'center' },
+  chip: { minHeight: 36, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18 },
+  chipOn: { backgroundColor: Ink.text, borderColor: Ink.text },
+  chipText: { fontSize: 14, fontWeight: '600', color: Ink.textDim },
+  chipTextOn: { color: Ink.bg },
+  week: { marginTop: 20 },
+  weekHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, paddingHorizontal: 4 },
+  weekTitle: { fontFamily: 'Unbounded_700Bold', fontSize: 17, color: Ink.text },
+  weekMeta: { fontSize: 13, color: Ink.textDim, fontVariant: ['tabular-nums'] },
+  session: { backgroundColor: Ink.raised, borderRadius: 14, marginBottom: 8, overflow: 'hidden' },
+  sessionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, minHeight: 64 },
+  sessionDate: { fontSize: 13, color: Ink.textDim },
+  sessionName: { fontFamily: 'Unbounded_500Medium', fontSize: 15, color: Ink.text, marginTop: 3 },
+  sessionTime: { fontSize: 14, color: Ink.text, fontVariant: ['tabular-nums'] },
+  sessionVol: { fontSize: 13, color: Ink.textFaint, marginTop: 2, fontVariant: ['tabular-nums'] },
+  editBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  editText: { fontSize: 14, color: Ink.textDim },
+  deleteBtn: { backgroundColor: Ink.line, justifyContent: 'center', alignItems: 'center', width: 88, borderRadius: 14, marginBottom: 8, marginLeft: 8 },
+  deleteText: { color: Ink.text, fontWeight: '700', fontSize: 14 },
+  selectCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: Ink.textFaint, alignItems: 'center', justifyContent: 'center' },
+  selectCircleOn: { backgroundColor: Ink.text, borderColor: Ink.text },
+  selectTick: { color: Ink.bg, fontSize: 13, fontWeight: '800' },
+  cardList: { backgroundColor: Ink.bg, padding: 10, gap: 8 },
+  mergeBtn: { minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 22, alignItems: 'center' },
+  mergeText: { fontSize: 14, color: Ink.textDim },
 });
 
-const coll = StyleSheet.create({
-  group: { backgroundColor: Ink.raised, borderRadius: 4, marginBottom: 10, overflow: 'hidden' },
-  groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  groupName: { fontSize: 13, fontWeight: '700', color: Ink.text, },
-  chevron: { fontSize: 12, color: Ink.textFaint },
-  dateRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: Ink.line },
-  dateText: { fontSize: 13, color: Ink.textDim },
-  dateGym: { fontSize: 8, color: Ink.textFaint, marginTop: 2 },
-  dateMeta: { fontSize: 11, color: Ink.textFaint, marginRight: 8 },
-  chevronSm: { fontSize: 10, color: Ink.textFaint },
-  cardList: { backgroundColor: Ink.bg, padding: 12, gap: 0 },
-  deleteBtn: { backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'center', width: 80 },
-  deleteBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  dateRowSelected: { backgroundColor: '#0a1828' },
-  selectCircle: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  selectCircleFilled: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  mergeBtn: { marginTop: 12, paddingVertical: 10, borderWidth: 1, borderColor: Ink.line, borderRadius: 4, alignItems: 'center' },
-  mergeBtnText: { fontSize: 12, color: Ink.textFaint, },
+const hCard = StyleSheet.create({
+  container: { backgroundColor: Ink.raised, borderRadius: 12, padding: 14 },
+  name: { fontFamily: 'Unbounded_500Medium', fontSize: 14, color: Ink.text },
+  muscles: { fontSize: 13, color: Ink.textFaint, marginTop: 2, marginBottom: 8 },
+  setBlock: { marginTop: 2 },
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 28 },
+  setNum: { width: 20, fontSize: 13, color: Ink.textFaint, fontVariant: ['tabular-nums'] },
+  setValue: { fontSize: 15, color: Ink.text, fontVariant: ['tabular-nums'] },
+  rpe: { fontSize: 13, color: Ink.textFaint },
+  sep: { fontSize: 14, color: Ink.textFaint },
+  editInput: { minWidth: 64, height: 40, borderWidth: 1, borderColor: Ink.line, borderRadius: 10, textAlign: 'center', fontSize: 15, color: Ink.text, fontVariant: ['tabular-nums'] },
+  note: { fontSize: 14, color: Ink.textDim, marginTop: 8 },
 });
 
-const histCard = StyleSheet.create({
-  setValue: { fontSize: 14, color: Ink.textDim, minWidth: 56, textAlign: 'center', fontVariant: ['tabular-nums'] },
-  editInput: { fontSize: 14, color: '#fff', minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'], borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 2 },
-  noteText: { fontSize: 12, color: Ink.textFaint, marginTop: 6, lineHeight: 16 },
+const sum2 = StyleSheet.create({
+  hero: { marginBottom: 20 },
+  heroLabel: { fontSize: 14, color: Ink.textDim },
+  heroValue: { fontFamily: 'Unbounded_700Bold', fontSize: 48, color: Ink.text, marginTop: 4, fontVariant: ['tabular-nums'] },
+  heroUnit: { fontFamily: 'Unbounded_500Medium', fontSize: 18, color: Ink.textDim },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  cell: { width: '48%', flexGrow: 1, backgroundColor: Ink.raised, borderRadius: 14, padding: 16 },
+  cellLabel: { fontSize: 13, color: Ink.textDim },
+  cellValue: { fontFamily: 'Unbounded_700Bold', fontSize: 20, color: Ink.text, marginTop: 6, fontVariant: ['tabular-nums'] },
+  fieldLabel: { fontSize: 14, color: Ink.textDim, marginBottom: 8 },
+  field: { height: 52, backgroundColor: Ink.raised, borderWidth: 1, borderColor: Ink.line, borderRadius: 14, fontFamily: 'Unbounded_500Medium', fontSize: 18, textAlign: 'center', color: Ink.text },
+  primary: { marginTop: 28, minHeight: 56, borderRadius: 28, backgroundColor: Ink.text, alignItems: 'center', justifyContent: 'center' },
+  primaryText: { fontSize: 17, fontWeight: '800', color: Ink.bg },
+  secondary: { marginTop: 10, minHeight: 52, borderRadius: 26, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
+  secondaryText: { fontSize: 15, fontWeight: '600', color: Ink.text },
 });
 
 const summ = StyleSheet.create({
   exRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Ink.line },
-  exName: { fontSize: 13, color: Ink.textFaint, flex: 1 },
-  exTime: { fontSize: 13, color: Ink.textFaint, fontVariant: ['tabular-nums'] },
+  exName: { fontSize: 14, color: Ink.textDim, flex: 1 },
+  exTime: { fontSize: 14, color: Ink.textDim, fontVariant: ['tabular-nums'] },
 });
 
 const poster = StyleSheet.create({
   header: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 8, flexDirection: 'row', alignItems: 'flex-start' },
   brand: { fontSize: 10, fontWeight: '800', letterSpacing: 7, color: '#fff' },
   phase: { fontFamily: 'Unbounded_700Bold', fontSize: 22, color: Ink.text, textAlign: 'right' },
-  dateLine: { fontFamily: 'Unbounded_500Medium', fontSize: 12, color: Ink.text, marginTop: 20 },
-  title: { fontFamily: 'Unbounded_700Bold', fontSize: 44, color: Ink.text, textTransform: 'uppercase', marginTop: 2, marginBottom: 16 },
+  dateLine: { fontFamily: 'Unbounded_500Medium', fontSize: 13, color: Ink.text, marginTop: 20, ...Legible },
+  title: { fontFamily: 'Unbounded_700Bold', fontSize: 44, color: Ink.text, textTransform: 'uppercase', marginTop: 2, marginBottom: 16, ...Legible },
   sideTag: { position: 'absolute', left: 0, bottom: 150, width: 16, height: 150, alignItems: 'center', justifyContent: 'center' },
-  sideTagText: { width: 150, textAlign: 'center', fontFamily: 'Unbounded_500Medium', fontSize: 10, color: Ink.textDim, transform: [{ rotate: '-90deg' }] },
-  histBtn: { minHeight: 36, paddingHorizontal: 22, justifyContent: 'center', borderWidth: 1, borderColor: Ink.text, borderRadius: 18 },
-  histBtnText: { fontSize: 14, fontWeight: '600', color: Ink.text },
+  sideTagText: { width: 150, textAlign: 'center', fontFamily: 'Unbounded_500Medium', fontSize: 11, color: Ink.text, transform: [{ rotate: '-90deg' }], ...Legible },
+  histBtn: { minHeight: 36, paddingHorizontal: 22, justifyContent: 'center', borderWidth: 1, borderColor: Ink.text, borderRadius: 18, backgroundColor: 'rgba(9,9,14,0.7)' },
+  histBtnText: { fontSize: 14, fontWeight: '600', color: Ink.text, ...Legible },
   slot: { paddingVertical: 20, paddingHorizontal: 24, alignItems: 'center' },
   artistName: { textAlign: 'center' },
   todayTag: { fontSize: 12, marginTop: 8, color: Ink.textFaint },
   cardList: { paddingHorizontal: 20, paddingBottom: 4, paddingTop: 4 },
-  lineupRow: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  lineupDropset: { fontSize: 12, color: Ink.textFaint, fontVariant: ['tabular-nums'], marginTop: 3, textAlign: 'right' },
-  lineupIdx: { fontSize: 12, color: Ink.textFaint, fontVariant: ['tabular-nums'], width: 24 },
-  lineupName: { fontSize: 16, fontWeight: '700', color: Ink.text, letterSpacing: 0.3 },
-  lineupMuscle: { fontSize: 12, color: Ink.textFaint, marginTop: 4, textTransform: 'capitalize' },
-  lineupWeight: { fontSize: 15, fontWeight: '600', color: Ink.textDim, fontVariant: ['tabular-nums'] },
-  lineupSets: { fontSize: 13, color: Ink.textDim, fontVariant: ['tabular-nums'] },
+  lineupRow: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Ink.textFaint, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  lineupDropset: { fontSize: 12, color: Ink.textDim, fontVariant: ['tabular-nums'], marginTop: 3, textAlign: 'right', ...Legible },
+  lineupIdx: { fontSize: 12, color: Ink.textDim, fontVariant: ['tabular-nums'], width: 24, ...Legible },
+  lineupName: { fontSize: 16, fontWeight: '700', color: Ink.text, letterSpacing: 0.3, ...Legible },
+  lineupMuscle: { fontSize: 13, color: Ink.textDim, marginTop: 4, textTransform: 'capitalize', ...Legible },
+  lineupWeight: { fontSize: 15, fontWeight: '600', color: Ink.textDim, fontVariant: ['tabular-nums'], ...Legible },
+  lineupSets: { fontSize: 13, color: Ink.textDim, fontVariant: ['tabular-nums'], ...Legible },
   lineupRemove: { fontSize: 12, color: Ink.textFaint, marginTop: 6 },
-  lineupPrevRef: { fontSize: 12, color: Ink.textDim, marginTop: 4, fontVariant: ['tabular-nums'] },
+  lineupPrevRef: { fontSize: 12, color: Ink.textDim, marginTop: 4, fontVariant: ['tabular-nums'], ...Legible },
   darkCard: { backgroundColor: Ink.raised, borderRadius: 10, padding: 14, marginBottom: 8, borderLeftWidth: 3 },
   cardName: { fontSize: 15, fontWeight: '600', color: Ink.text, flex: 1 },
   cardBadge: { fontSize: 12, color: Ink.textFaint },
@@ -3045,10 +3271,10 @@ const poster = StyleSheet.create({
   swapCloseText: { fontSize: 15, fontWeight: '600', color: Ink.textDim },
   footer: { padding: 16, paddingBottom: 32 },
   venueRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, marginBottom: 6 },
-  venueLabel: { fontSize: 13, color: Ink.textFaint },
-  venueChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18 },
+  venueLabel: { fontSize: 13, color: Ink.textDim, ...Legible },
+  venueChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.textFaint, borderRadius: 18, backgroundColor: 'rgba(9,9,14,0.7)' },
   venueChipActive: { backgroundColor: Ink.text, borderColor: Ink.text },
-  venueChipText: { fontSize: 13, fontWeight: '600', color: Ink.textDim },
+  venueChipText: { fontSize: 13, fontWeight: '600', color: Ink.text },
   venueChipTextActive: { color: Ink.bg },
   startBtn: { minHeight: 56, justifyContent: 'center', alignItems: 'center', borderRadius: 14, backgroundColor: Ink.text },
   startBtnText: { color: Ink.bg, fontSize: 17, fontWeight: '800' },
@@ -3058,12 +3284,12 @@ const poster = StyleSheet.create({
   addExBtnText: { fontSize: 15, color: Ink.textDim, fontWeight: '600' },
   // Headliner slot
   headlinerSlot: { paddingVertical: 32, paddingHorizontal: 24, alignItems: 'center' },
-  headlinerLabel: { fontSize: 13, color: Ink.textFaint, marginBottom: 16 },
+  headlinerLabel: { fontSize: 13, color: Ink.textDim, marginBottom: 16, ...Legible },
   headlinerBox: { alignItems: 'center', marginBottom: 12 },
-  headlinerSub: { fontSize: 14, color: Ink.textDim, marginTop: 8 },
+  headlinerSub: { fontSize: 14, color: Ink.textDim, marginTop: 8, ...Legible },
   // Supporting acts
   supportSection: { paddingHorizontal: 24, paddingBottom: 24 },
-  supportDivider: { height: 1, backgroundColor: Ink.line, marginBottom: 8 },
+  supportDivider: { height: 1, backgroundColor: Ink.textFaint, marginBottom: 8 },
   sectionTitle: { fontSize: 13, fontWeight: '600', color: Ink.textFaint, marginTop: 20, marginBottom: 12 },
   supportRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 14 },
   supportDay: { fontSize: 8, color: Ink.textFaint, width: 28 },
@@ -3095,107 +3321,76 @@ const swap = StyleSheet.create({
   optionMuscles: { fontSize: 12, color: Ink.textDim, marginTop: 2 },
 });
 
-const card = StyleSheet.create({
-  container: { backgroundColor: Ink.raised, borderRadius: 4, padding: 14, marginBottom: 8, borderLeftWidth: 2, borderLeftColor: '#1a1a2e' },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, gap: 8 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  name: { fontSize: 13, fontWeight: '700', flex: 1, color: Ink.text, },
-  badge: { fontSize: 9, color: Ink.textFaint, },
-  muscles: { fontSize: 10, color: Ink.textFaint, marginTop: 2, },
-  target: { fontSize: 11, color: Ink.textFaint, marginBottom: 8, marginTop: 4 },
-  setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  setNum: { width: 24, fontSize: 11, color: Ink.textFaint, fontWeight: '700', textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
-  setInner: { flexDirection: 'row', alignItems: 'center' },
-  input: { width: 56, fontSize: 14, textAlign: 'center', color: '#fff' },
-  sep: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 4 },
-  rpeInput: { width: 44 },
-  dropGroup: { flexDirection: 'row', alignItems: 'center' },
-  arrow: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 6 },
-  dropRemove: { fontSize: 11, color: Ink.textFaint, marginLeft: 4 },
-  dropBtn: { marginLeft: 10, justifyContent: 'center' },
-  dropBtnText: { fontSize: 11, color: '#5a2a2a' },
-  removeBtn: { width: 28, alignItems: 'center', marginLeft: 4 },
-  removeBtnText: { color: Ink.textFaint, fontSize: 14 },
-  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
-  confirmBtnDone: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  confirmBtnText: { fontSize: 13, color: Ink.textFaint, fontWeight: '700' },
-  confirmBtnTextDone: { color: '#fff' },
-  addSet: { marginTop: 4 },
-  addSetText: { fontSize: 11, color: Ink.textFaint, },
-  notes: { fontSize: 13, color: Ink.textFaint, marginTop: 8, borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 4 },
-  cue: { fontSize: 11, color: '#1e1e30', marginTop: 4 },
-  exTime: { fontSize: 11, color: Ink.textFaint, marginTop: 4 },
-  swapHint: { fontSize: 9, color: '#2a4a7a', marginTop: 2 },
-});
-
 // Active session card — dark concert poster treatment
 const aCard = StyleSheet.create({
-  container: { backgroundColor: Ink.raised, borderRadius: 4, borderLeftWidth: 2, borderLeftColor: '#1a1a2e', padding: 16, marginBottom: 12 },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, gap: 8 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  name: { fontSize: 14, fontWeight: '800', flex: 1, color: '#e8e8e8' },
-  badge: { fontSize: 9, color: Ink.textFaint, },
-  muscles: { fontSize: 10, color: Ink.textFaint, marginTop: 2 },
-  target: { fontSize: 12, color: Ink.textFaint, marginBottom: 10, marginTop: 6 },
-  setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  setNum: { width: 28, fontSize: 11, color: Ink.textFaint, fontWeight: '700', textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
-  setNumConfirmed: { color: '#34C759' },
-  setInner: { flexDirection: 'row', alignItems: 'center' },
+  container: { backgroundColor: Ink.raised, borderRadius: 14, padding: 16, marginBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  name: { fontFamily: 'Unbounded_700Bold', fontSize: 16, lineHeight: 22, color: Ink.text },
+  muscles: { fontSize: 13, color: Ink.textFaint, marginTop: 2 },
+  menuBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  menuBtnText: { fontSize: 14, color: Ink.textFaint, letterSpacing: 1 },
+  menuRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  menuPill: { borderWidth: 1, borderColor: Ink.line, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
+  menuPillText: { fontSize: 13, color: Ink.text },
+  target: { fontSize: 14, color: Ink.textDim, marginTop: 12, fontVariant: ['tabular-nums'] },
+  prevRef: { fontSize: 13, color: Ink.textFaint, marginTop: 4, fontVariant: ['tabular-nums'] },
+  setBlock: { marginTop: 12 },
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  setNumWrap: { width: 40, height: 48, justifyContent: 'center' },
+  setNum: { fontFamily: 'Unbounded_500Medium', fontSize: 14, color: Ink.textFaint, fontVariant: ['tabular-nums'] },
+  setNumConfirmed: { color: Ink.text },
   input: {
-    width: 56,
-    backgroundColor: '#131328',
+    flex: 1,
+    height: 48,
+    backgroundColor: Ink.bg,
     borderWidth: 1,
     borderColor: Ink.line,
-    borderRadius: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    fontSize: 15,
-    fontWeight: '600',
+    borderRadius: 12,
+    fontFamily: 'Unbounded_500Medium',
+    fontSize: 18,
     textAlign: 'center',
-    color: '#fff',
+    color: Ink.text,
+    fontVariant: ['tabular-nums'],
   },
-  sep: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 4 },
-  rpeInput: { width: 44 },
-  dropGroup: { flexDirection: 'row', alignItems: 'center' },
-  arrow: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 6 },
-  dropRemove: { fontSize: 11, color: Ink.textFaint, marginLeft: 4 },
-  dropBtn: { marginLeft: 10, justifyContent: 'center' },
-  dropBtnText: { fontSize: 11, color: '#5a2a2a', letterSpacing: 0.5 },
-  removeBtn: { width: 28, alignItems: 'center', marginLeft: 4 },
-  removeBtnText: { color: Ink.textFaint, fontSize: 14 },
-  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
-  confirmBtnDone: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  confirmBtnText: { fontSize: 13, color: Ink.textFaint, fontWeight: '700' },
-  confirmBtnTextDone: { color: '#fff' },
-  addSet: { marginTop: 4 },
-  addSetText: { fontSize: 11, color: Ink.textFaint, },
-  notes: { fontSize: 13, color: Ink.textFaint, marginTop: 10, borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 6 },
-  cue: { fontSize: 11, color: Ink.textFaint, marginTop: 6 },
-  prevRef: { fontSize: 10, color: Ink.text, marginTop: 3, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
-  exTime: { fontSize: 11, color: Ink.textFaint, marginTop: 6 },
-  swapHint: { fontSize: 9, color: '#2a4a7a', marginTop: 2 },
+  inputDone: { color: Ink.textFaint, borderColor: 'transparent', backgroundColor: 'transparent' },
+  smallInput: { flex: 0, width: 64, height: 36, fontSize: 14, borderRadius: 10 },
+  sep: { fontSize: 15, color: Ink.textFaint },
+  confirmBtn: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
+  confirmBtnDone: { backgroundColor: Ink.text, borderColor: Ink.text },
+  confirmBtnText: { fontSize: 18, color: Ink.textFaint, fontWeight: '700' },
+  confirmBtnTextDone: { color: Ink.bg },
+  moreLabel: { fontSize: 13, color: Ink.textDim },
+  moreLink: { fontSize: 13, color: Ink.textDim },
+  dropLinks: { flexDirection: 'row', gap: 20, marginTop: 8, paddingLeft: 48 },
+  dropArrow: { fontSize: 16, color: Ink.textFaint },
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 48 },
+  rateChip: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
+  rateChipText: { fontSize: 14, fontWeight: '600', color: Ink.text },
+  rateTag: { marginTop: 6, paddingLeft: 48 },
+  swipeDelete: { width: 110, backgroundColor: Ink.line, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  swipeDeleteText: { fontSize: 14, fontWeight: '700', color: Ink.text },
+  undoBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: Ink.bg, borderRadius: 10 },
+  undoText: { fontSize: 14, color: Ink.textDim },
+  undoBtn: { fontSize: 14, fontWeight: '700', color: Ink.text },
+  addSet: { marginTop: 14, paddingVertical: 8 },
+  addSetText: { fontSize: 14, color: Ink.textDim },
+  notes: { fontSize: 14, color: Ink.textDim, marginTop: 10, borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 6 },
+  collapsed: { flexDirection: 'row', alignItems: 'center', backgroundColor: Ink.raised, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 12, gap: 12 },
+  collapsedName: { fontFamily: 'Unbounded_500Medium', fontSize: 14, color: Ink.textDim },
+  collapsedSets: { fontSize: 13, color: Ink.textFaint, marginTop: 3, fontVariant: ['tabular-nums'] },
+  collapsedTick: { fontSize: 18, color: Ink.text },
   // Plate calculator
-  plateCalc: { backgroundColor: '#0a0a18', borderRadius: 3, padding: 10, marginBottom: 10 },
-  plateRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginBottom: 6 },
-  plateLabel: { fontSize: 10, color: Ink.textFaint, width: 28 },
-  plateInput: { width: 44, backgroundColor: '#131328', borderWidth: 1, borderColor: Ink.line, borderRadius: 3, paddingVertical: 4, paddingHorizontal: 4, fontSize: 12, fontWeight: '600' as const, textAlign: 'center' as const, color: Ink.textDim },
-  plateResult: { fontSize: 12, color: Ink.textDim, letterSpacing: 0.3, fontVariant: ['tabular-nums' as const] },
+  plateCalc: { backgroundColor: Ink.bg, borderRadius: 12, padding: 12, marginTop: 12 },
+  plateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  plateLabel: { fontSize: 13, color: Ink.textFaint },
+  plateInput: { width: 56, height: 36, backgroundColor: Ink.raised, borderWidth: 1, borderColor: Ink.line, borderRadius: 10, fontSize: 14, textAlign: 'center', color: Ink.text },
+  plateResult: { fontSize: 14, color: Ink.textDim, fontVariant: ['tabular-nums'] },
   // RPE guide
-  rpeGuideBtn: { marginLeft: 6, width: 18, alignItems: 'center' as const, justifyContent: 'center' as const },
-  rpeGuideBtnText: { fontSize: 11, color: Ink.textFaint },
-  rpeGuide: { marginTop: 6, backgroundColor: '#0a0a18', borderRadius: 3, padding: 10 },
-  rpeGuideRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 3, gap: 8 },
-  rpeGuideNum: { width: 44, fontSize: 10, color: Ink.textFaint, fontWeight: '700' as const, letterSpacing: 0.5 },
-  rpeGuideRir: { width: 40, fontSize: 10, color: Ink.textDim, fontVariant: ['tabular-nums' as const] },
-  rpeGuideDesc: { fontSize: 10, color: Ink.textFaint, flex: 1 },
-});
-
-const drag = StyleSheet.create({
-  handle: { backgroundColor: Ink.raised, borderTopLeftRadius: 4, borderTopRightRadius: 4, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: -4 },
-  handleDots: { fontSize: 13, color: Ink.textFaint, },
-  handleLabel: { fontSize: 9, color: Ink.textFaint, },
-  removeBtn: { position: 'absolute', right: 12, padding: 4 },
-  removeBtnText: { fontSize: 13, color: Ink.textFaint },
+  rpeGuide: { marginTop: 10, backgroundColor: Ink.bg, borderRadius: 12, padding: 12 },
+  rpeGuideRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 },
+  rpeGuideNum: { width: 52, fontSize: 12, color: Ink.textDim, fontWeight: '700' },
+  rpeGuideRir: { width: 44, fontSize: 12, color: Ink.textDim, fontVariant: ['tabular-nums'] },
+  rpeGuideDesc: { fontSize: 12, color: Ink.textFaint, flex: 1 },
 });
 
 const diag = StyleSheet.create({

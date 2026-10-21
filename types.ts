@@ -7,6 +7,8 @@ export type WorkoutSet = {
   reps: string;
   rpe?: string;
   drops: Drop[];
+  /** Ticked off during the session. Older history entries don't have it and count as done. */
+  done?: boolean;
 };
 
 export type Exercise = {

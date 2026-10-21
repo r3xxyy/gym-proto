@@ -1,7 +1,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { Ink } from '@/constants/theme';
-import { POSTER_NAMES, SPLIT } from '../constants/programs';
+import { Ink, Legible } from '@/constants/theme';
+import { POSTER_NAMES, SPLIT, SPLIT_LABEL } from '../constants/programs';
 
 
 type Props = {
@@ -23,7 +23,7 @@ export function ActRow({ day, done, isRest, onSelect, onRest, onUndoRest }: Prop
         disabled={done}
         activeOpacity={0.6}
         accessibilityRole="button"
-        accessibilityLabel={`${POSTER_NAMES[day]}, ${SPLIT[day]}`}>
+        accessibilityLabel={`${POSTER_NAMES[day]}, ${SPLIT_LABEL[day]}`}>
         <View style={{ flex: 1 }}>
           <Text
             numberOfLines={1}
@@ -32,7 +32,7 @@ export function ActRow({ day, done, isRest, onSelect, onRest, onUndoRest }: Prop
             style={[s.name, done && { color: Ink.textFaint }]}>
             {POSTER_NAMES[day]}
           </Text>
-          {SPLIT[day].toLowerCase() !== POSTER_NAMES[day].toLowerCase() && <Text style={s.split}>{SPLIT[day]}</Text>}
+          {SPLIT_LABEL[day].toLowerCase() !== POSTER_NAMES[day].toLowerCase() && <Text style={s.split}>{SPLIT_LABEL[day]}</Text>}
         </View>
       </TouchableOpacity>
       {done && isRest ? (
@@ -53,9 +53,9 @@ export function ActRow({ day, done, isRest, onSelect, onRest, onUndoRest }: Prop
 const s = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
   main: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 44 },
-  name: { fontFamily: 'Unbounded_700Bold', fontSize: 19, color: Ink.text, textTransform: 'uppercase' },
-  split: { fontSize: 13, color: Ink.textFaint, marginTop: 2 },
-  status: { fontSize: 13, color: Ink.textFaint },
-  restBtn: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18, backgroundColor: 'rgba(9,9,14,0.75)' },
-  restText: { fontSize: 13, fontWeight: '600', color: Ink.textDim },
+  name: { fontFamily: 'Unbounded_700Bold', fontSize: 19, color: Ink.text, textTransform: 'uppercase', ...Legible },
+  split: { fontSize: 14, fontWeight: '500', color: Ink.textDim, marginTop: 3, ...Legible },
+  status: { fontSize: 14, fontWeight: '500', color: Ink.textDim, ...Legible },
+  restBtn: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18, backgroundColor: 'rgba(9,9,14,0.8)' },
+  restText: { fontSize: 14, fontWeight: '600', color: Ink.text },
 });
