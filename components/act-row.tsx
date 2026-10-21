@@ -1,7 +1,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Ink, Legible } from '@/constants/theme';
-import { POSTER_NAMES, SPLIT, SPLIT_LABEL } from '../constants/programs';
+import { POSTER_NAMES, SPLIT_LABEL } from '../constants/programs';
 
 
 type Props = {

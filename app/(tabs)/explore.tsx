@@ -11,6 +11,8 @@ import { TrendChart } from '@/components/trend-chart';
 import { countedSets, exerciseSeries, parseDateLocal, personalRecords } from '@/lib/progress';
 import type { PersonalRecord } from '@/lib/progress';
 import { sessionVolume } from '@/lib/session-stats';
+import { formatWeekForCoach } from '@/lib/coach-text';
+import { BADGES_PATH, EPOCH_PATH, HISTORY_PATH } from '@/lib/storage';
 
 // ─── Muscle mapping ───────────────────────────────────────────────────────────
 
@@ -41,60 +43,6 @@ const MUSCLE_GROUPS: Record<string, string> = {
   'abs': 'Core',
 };
 
-const HISTORY_PATH = FileSystem.documentDirectory + 'history.json';
-const BADGES_PATH  = FileSystem.documentDirectory + 'badges.json';
-const EPOCH_PATH   = FileSystem.documentDirectory + 'epoch.json';
-
-function formatTime(totalSeconds: number) {
-  const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-  const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-  const ss = String(totalSeconds % 60).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
-}
-
-function formatWeekForCoach(weekEntries: HistoryEntry[]): string {
-  const totalVolume = weekEntries.reduce((total, entry) => total + sessionVolume(entry.exercises), 0);
-
-  const totalActive = weekEntries.reduce((t, e) => t + e.duration, 0);
-  const totalRest = weekEntries.reduce((t, e) => t + e.restTime, 0);
-
-  const lines: string[] = [
-    `WEEK REVIEW`,
-    `SESSIONS: ${weekEntries.length}  |  TOTAL VOLUME: ${totalVolume.toLocaleString()} kg`,
-    `ACTIVE: ${formatTime(totalActive)}  |  REST: ${formatTime(totalRest)}`,
-    ``,
-  ];
-
-  weekEntries.forEach(entry => {
-    const vol = sessionVolume(entry.exercises);
-    lines.push(`── ${entry.workoutName} (${entry.date})  |  Vol: ${vol.toLocaleString()} kg  |  Active: ${formatTime(entry.duration)}`);
-    entry.exercises.forEach(ex => {
-      lines.push(`  ${ex.name} [${ex.muscles}]`);
-      lines.push(`    Target: ${ex.target}`);
-      const rpeVals = ex.sets.map(s => parseFloat(s.rpe ?? '')).filter(n => !isNaN(n));
-      const avgRpe = rpeVals.length > 0 ? (rpeVals.reduce((a, b) => a + b, 0) / rpeVals.length).toFixed(1) : null;
-      const setStrs = ex.sets.map(s => {
-        let str = `${s.weight}kg×${s.reps}`;
-        if (s.drops?.length > 0) str += ` → ${s.drops.map(d => `${d.weight}kg×${d.reps}`).join(' → ')}`;
-        return str;
-      }).join('  ');
-      lines.push(`    Logged: ${setStrs}${avgRpe ? `  [avg RPE ${avgRpe}]` : ''}`);
-      if (ex.notes?.trim()) lines.push(`    Note: ${ex.notes.trim()}`);
-    });
-    lines.push('');
-  });
-
-  lines.push(`---`);
-  lines.push(`📎 Attach any cardio summaries (screenshots from Apple Watch, NRC, Runkeeper etc.) to give full context on this week's training load.`);
-  lines.push(``);
-  lines.push(`Based on this full week of training:`);
-  lines.push(`1. What are the key performance trends across all sessions?`);
-  lines.push(`2. Which muscles were over/under stimulated relative to targets?`);
-  lines.push(`3. What adjustments should I make for next week (volume, intensity, exercise selection)?`);
-  lines.push(`4. Any recovery or programming flags going into next week?`);
-  lines.push(``);
-  return lines.join('\n');
-}
 
 function getMuscleGroups(muscles: string): string[] {
   const primary = muscles.split(',')[0].trim().toLowerCase();

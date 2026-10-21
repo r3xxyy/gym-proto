@@ -264,23 +264,18 @@ float band(float x, float c, float w, float soft) {
 vec3 studio(vec3 r) {
   float up = r.y;
   float az = atan(r.x, r.z);
-  // Cool grey sky over a near-black floor, with a crisp horizon: the horizon line bending across
-  // the curved wire is what makes the surface read as mercury.
-  vec3 sky = mix(vec3(0.50, 0.53, 0.58), vec3(0.97, 0.98, 1.0), smoothstep(-0.05, 0.8, up));
-  vec3 floorc = mix(vec3(0.02, 0.02, 0.025), vec3(0.42, 0.43, 0.46), smoothstep(-1.0, -0.04, up));
-  vec3 c = mix(floorc, sky, smoothstep(-0.035, 0.035, up));
-  // Dark band hugging the horizon, deepening the contrast along the wire.
-  c *= 1.0 - 0.5 * exp(-pow((up - 0.10) / 0.09, 2.0));
-  // Tall soft panels, each a bright vertical strip.
-  float v1 = smoothstep(0.02, 0.2, up) * (1.0 - smoothstep(0.65, 0.9, up));
-  c += vec3(0.95, 0.97, 1.0) * band(az, -0.95, 0.20, 0.16) * v1 * 0.85;
-  c += vec3(0.85, 0.92, 1.0) * band(az, 0.75, 0.10, 0.12) * v1 * 0.70;
-  c += vec3(1.0, 0.99, 0.97) * band(az, 2.45, 0.32, 0.20) * v1 * 0.60;
-  // A broad soft box behind the camera, which is what camera-facing surfaces mirror.
-  c += vec3(0.95, 0.96, 0.98) * band(az, 0.0, 0.5, 0.45) * smoothstep(-0.2, 0.3, up) * 0.5;
-  // A strip light overhead and a faint cool kicker low behind.
-  c += vec3(1.0) * band(up, 0.93, 0.03, 0.05) * 0.5;
-  c += vec3(0.4, 0.5, 0.7) * band(az, -2.6, 0.25, 0.25) * (1.0 - v1) * smoothstep(-0.6, -0.1, up) * 0.35;
+  // A dark studio with a few hard, bright panels. Mercury is all contrast: near-black reflections
+  // sitting right next to bright strips, with the horizon line bending across the wire.
+  vec3 sky = mix(vec3(0.27, 0.29, 0.33), vec3(0.72, 0.75, 0.82), smoothstep(-0.05, 0.9, up));
+  vec3 floorc = mix(vec3(0.008, 0.008, 0.012), vec3(0.12, 0.125, 0.15), smoothstep(-1.0, -0.04, up));
+  vec3 c = mix(floorc, sky, smoothstep(-0.03, 0.03, up));
+  c *= 1.0 - 0.8 * exp(-pow((up - 0.10) / 0.09, 2.0));
+  float v1 = smoothstep(0.0, 0.18, up) * (1.0 - smoothstep(0.7, 0.92, up));
+  c += vec3(1.0, 1.0, 1.02) * band(az, -0.95, 0.16, 0.07) * v1 * 1.35;
+  c += vec3(0.9, 0.95, 1.0) * band(az, 0.75, 0.07, 0.06) * v1 * 1.1;
+  c += vec3(1.0, 0.99, 0.97) * band(az, 2.45, 0.22, 0.10) * v1 * 0.95;
+  c += vec3(1.0) * band(az, 0.1, 0.05, 0.05) * smoothstep(0.0, 0.25, up) * 0.8;
+  c += vec3(1.0) * band(up, 0.93, 0.025, 0.04) * 0.7;
   return c;
 }
 
@@ -298,8 +293,8 @@ void main() {
   vec3 env = studio(reflect(v, n));
 
   // Soft shoulder, then a gentle S-curve for the high contrast of liquid metal.
-  vec3 c = 1.0 - exp(-env * 2.8);
-  c = mix(c, c * c * (3.0 - 2.0 * c), 0.35);
+  vec3 c = 1.0 - exp(-env * 2.0);
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.55);
   float rim = pow(1.0 - max(dot(n0, -v), 0.0), 3.0);
   c = mix(c, vec3(0.86, 0.89, 0.95), 0.15 * rim);
   gl_FragColor = vec4(c * uDim * vec3(0.98, 0.99, 1.01), 1.0);

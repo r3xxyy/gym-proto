@@ -474,3 +474,9 @@ export const PARSE_DAY_HEADERS: Record<string, number> = {
 export const ALL_KNOWN_EXERCISES: Omit<Exercise, 'sets'>[] = [
   W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES,
 ].flatMap(w => Object.values(w).flat()).concat(SWAP_POOL);
+
+/** Stored workout name → weekday number (the inverse of SPLIT). */
+export const WORKOUT_TO_DAY: Record<string, number> = Object.fromEntries(
+  Object.entries(SPLIT).map(([d, n]) => [n, Number(d)])
+);
+
