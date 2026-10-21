@@ -19,11 +19,12 @@ import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { Swipeable, GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ActRow } from '@/components/act-row';
+import { ChromeChains } from '@/components/chrome-chains';
 import { Ink } from '@/constants/theme';
 import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { ALL_BADGES, checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
-import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, PUSH_EXERCISES, LEG_A_EXERCISES, PULL_EXERCISES, SHOULDER_EXERCISES, LEG_B_EXERCISES, SWAP_POOL, W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES, getWeekExercises, SPLIT, WORKOUT_ORDER, WEEK_DAYS, POSTER_NAMES, POSTER_COLORS, DAY_TEXT_STYLES, BOXED_DAYS } from '../../constants/programs';
+import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, PUSH_EXERCISES, LEG_A_EXERCISES, PULL_EXERCISES, SHOULDER_EXERCISES, LEG_B_EXERCISES, SWAP_POOL, W1_DAY_EXERCISES, W2_DAY_EXERCISES, W3_DAY_EXERCISES, W4_DAY_EXERCISES, getWeekExercises, SPLIT, WORKOUT_ORDER, WEEK_DAYS, POSTER_NAMES, DAY_TEXT_STYLES, BOXED_DAYS } from '../../constants/programs';
 
 // Show banners + play sound even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -1354,6 +1355,7 @@ const WEEK_PLAN_PATH    = FileSystem.documentDirectory + 'weekPlan.json';
 const PENDING_PATH       = FileSystem.documentDirectory + 'pendingSession.json';
 const ACTIVE_SESSION_PATH = FileSystem.documentDirectory + 'activeSession.json';
 const GYM_PATH           = FileSystem.documentDirectory + 'gym.json';
+const GYMS_PATH          = FileSystem.documentDirectory + 'gyms.json';
 const EPOCH_PATH         = FileSystem.documentDirectory + 'epoch.json';
 
 // Exercises where weight is venue-agnostic (dumbbells — same everywhere)
@@ -1701,6 +1703,7 @@ export default function HomeScreen() {
   const [swapQuery, setSwapQuery] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeGym, setActiveGym] = useState<string>('');
+  const [savedGyms, setSavedGyms] = useState<string[]>([]);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [newBadgeQueue, setNewBadgeQueue] = useState<BadgeDefinition[]>([]);
@@ -1728,10 +1731,15 @@ export default function HomeScreen() {
   const restStartRef = useRef<number>(0);     // timestamp when current rest period began
   const restAccRef = useRef<number>(0);       // accumulated rest seconds before current period
   const todayWorkout = getTodayWorkout();
-  const knownGyms = [...new Set([activeGym, ...history.map(h => h.gym)].filter((g): g is string => !!g))];
+  const knownGyms = [...new Set([...savedGyms, activeGym, ...history.map(h => h.gym)].filter((g): g is string => !!g))];
+  function saveGymList(list: string[]) {
+    setSavedGyms(list);
+    FileSystem.writeAsStringAsync(GYMS_PATH, JSON.stringify(list)).catch(() => {});
+  }
   function selectGym(gym: string) {
     setActiveGym(gym);
     FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(gym));
+    if (!savedGyms.includes(gym)) saveGymList([...savedGyms, gym]);
   }
 
   function renameGym(oldName: string, newName: string) {
@@ -1742,6 +1750,7 @@ export default function HomeScreen() {
       FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(next));
       return next;
     });
+    saveGymList([...new Set(savedGyms.map(g => g === oldName ? trimmed : g).concat(trimmed))]);
     if (activeGym === oldName) {
       setActiveGym(trimmed);
       FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(trimmed));
@@ -1782,6 +1791,15 @@ export default function HomeScreen() {
       isRestDay: true,
     };
     const updated = [entry, ...history];
+    setHistory(updated);
+    FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
+  }
+
+  function undoRestDay(day: number) {
+    const ids = new Set(
+      thisWeekHistory.filter(h => h.isRestDay && WORKOUT_TO_DAY[h.workoutName] === day).map(h => h.id)
+    );
+    const updated = history.filter(h => !ids.has(h.id));
     setHistory(updated);
     FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
   }
@@ -2211,6 +2229,11 @@ export default function HomeScreen() {
       }
       setUnlockedBadges(loadedBadges);
       // Load active gym preference
+      const gymsInfo = await FileSystem.getInfoAsync(GYMS_PATH);
+      if (gymsInfo.exists) {
+        const list = JSON.parse(await FileSystem.readAsStringAsync(GYMS_PATH));
+        if (Array.isArray(list)) setSavedGyms(list.filter((g): g is string => typeof g === 'string' && !!g));
+      }
       const gymInfo = await FileSystem.getInfoAsync(GYM_PATH);
       if (gymInfo.exists) {
         const raw = await FileSystem.readAsStringAsync(GYM_PATH);
@@ -2277,14 +2300,23 @@ export default function HomeScreen() {
     <View style={styles.root}>
       {/* ── Home ── */}
       {screen === 'home' && (
-        <View style={{ flex: 1, backgroundColor: '#080810' }}>
+        <View style={{ flex: 1, backgroundColor: Ink.bg }}>
+          {/* ── Chrome chains — fill the screen behind the type ── */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <ChromeChains />
+          </View>
+          {selectedDay === null && (
+            <View pointerEvents="none" style={poster.sideTag}>
+              <Text style={poster.sideTagText}>WK {currentWeek} / {new Date().getFullYear()}</Text>
+            </View>
+          )}
 
           {/* ── Poster Header ── */}
           <View style={poster.header}>
-            <Text style={poster.phase}>Week {currentWeek} line-up</Text>
-            <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'home'; setScreen('history'); }}>
+            <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'home'; setScreen('history'); }} accessibilityRole="button">
               <Text style={poster.histBtnText}>History</Text>
             </TouchableOpacity>
+
           </View>
 
           {/* ── Venue Picker — always visible ── */}
@@ -2317,7 +2349,7 @@ export default function HomeScreen() {
           </View>
 
           {/* ── Lineup ── */}
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={selectedDay === null ? { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 24 } : { flexGrow: 1, paddingBottom: 32 }}>
             {(() => {
 
 
@@ -2326,7 +2358,8 @@ export default function HomeScreen() {
                 return (
                   <>
                     <View style={poster.supportSection}>
-                      <Text style={poster.sectionTitle}>This week</Text>
+                      <Text style={poster.dateLine}>{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.')}</Text>
+                      <Text style={poster.title}>Week {currentWeek}</Text>
                       {WEEK_DAYS.map((day, i) => {
                         const done = completedDays.includes(day);
                         const isRest = !!(done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay));
@@ -2339,6 +2372,7 @@ export default function HomeScreen() {
                             last={i === WEEK_DAYS.length - 1}
                             onSelect={() => setSelectedDay(day)}
                             onRest={() => logRestDay(day)}
+                            onUndoRest={() => undoRestDay(day)}
                           />
                         );
                       })}
@@ -2376,7 +2410,7 @@ export default function HomeScreen() {
                       <AnimatedPosterName
                         day={headlineDay}
                         isActive={!headlineDone}
-                        style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? Ink.textFaint : POSTER_COLORS[headlineDay] }]}
+                        style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? Ink.textFaint : Ink.text }]}
                       />
                     </View>
                     <Text style={poster.headlinerSub}>{SPLIT[headlineDay]}</Text>
@@ -2495,6 +2529,7 @@ export default function HomeScreen() {
                             last={i === supportDays.length - 1}
                             onSelect={() => setSelectedDay(day)}
                             onRest={() => logRestDay(day)}
+                            onUndoRest={() => undoRestDay(day)}
                           />
                         );
                       })}
@@ -2580,7 +2615,7 @@ export default function HomeScreen() {
           {/* ── Footer — START WORKOUT only ── */}
           {selectedDay !== null && !completedDays.includes(selectedDay) && (
             <View style={poster.footer}>
-              <TouchableOpacity style={[poster.startBtn, { backgroundColor: POSTER_COLORS[selectedDay] }]} onPress={startWorkout} accessibilityRole="button">
+              <TouchableOpacity style={poster.startBtn} onPress={startWorkout} accessibilityRole="button">
                 <Text style={poster.startBtnText}>Start workout</Text>
               </TouchableOpacity>
             </View>
@@ -2966,11 +3001,15 @@ const summ = StyleSheet.create({
 });
 
 const poster = StyleSheet.create({
-  header: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: Ink.line },
+  header: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 8, flexDirection: 'row', alignItems: 'flex-start' },
   brand: { fontSize: 10, fontWeight: '800', letterSpacing: 7, color: '#fff' },
-  phase: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5, color: Ink.text },
-  histBtn: { minHeight: 40, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 20 },
-  histBtnText: { fontSize: 14, fontWeight: '600', color: Ink.textDim },
+  phase: { fontFamily: 'Unbounded_700Bold', fontSize: 22, color: Ink.text, textAlign: 'right' },
+  dateLine: { fontFamily: 'Unbounded_500Medium', fontSize: 12, color: Ink.text, marginTop: 20 },
+  title: { fontFamily: 'Unbounded_700Bold', fontSize: 44, color: Ink.text, textTransform: 'uppercase', marginTop: 2, marginBottom: 16 },
+  sideTag: { position: 'absolute', left: 0, bottom: 150, width: 16, height: 150, alignItems: 'center', justifyContent: 'center' },
+  sideTagText: { width: 150, textAlign: 'center', fontFamily: 'Unbounded_500Medium', fontSize: 10, color: Ink.textDim, transform: [{ rotate: '-90deg' }] },
+  histBtn: { minHeight: 36, paddingHorizontal: 22, justifyContent: 'center', borderWidth: 1, borderColor: Ink.text, borderRadius: 18 },
+  histBtnText: { fontSize: 14, fontWeight: '600', color: Ink.text },
   slot: { paddingVertical: 20, paddingHorizontal: 24, alignItems: 'center' },
   artistName: { textAlign: 'center' },
   todayTag: { fontSize: 12, marginTop: 8, color: Ink.textFaint },
@@ -3004,14 +3043,14 @@ const poster = StyleSheet.create({
   swapEmpty: { fontSize: 14, color: Ink.textFaint, paddingVertical: 16 },
   swapClose: { marginTop: 16, minHeight: 48, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 12, alignItems: 'center' },
   swapCloseText: { fontSize: 15, fontWeight: '600', color: Ink.textDim },
-  footer: { padding: 16, paddingBottom: 32, backgroundColor: Ink.bg, borderTopWidth: 1, borderTopColor: Ink.line },
+  footer: { padding: 16, paddingBottom: 32 },
   venueRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, marginBottom: 6 },
   venueLabel: { fontSize: 13, color: Ink.textFaint },
   venueChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18 },
   venueChipActive: { backgroundColor: Ink.text, borderColor: Ink.text },
   venueChipText: { fontSize: 13, fontWeight: '600', color: Ink.textDim },
   venueChipTextActive: { color: Ink.bg },
-  startBtn: { minHeight: 56, justifyContent: 'center', alignItems: 'center', borderRadius: 14 },
+  startBtn: { minHeight: 56, justifyContent: 'center', alignItems: 'center', borderRadius: 14, backgroundColor: Ink.text },
   startBtnText: { color: Ink.bg, fontSize: 17, fontWeight: '800' },
   cardRemove: { position: 'absolute', top: 8, right: 8, padding: 6 },
   cardRemoveText: { fontSize: 13, color: Ink.textFaint },
@@ -3025,7 +3064,7 @@ const poster = StyleSheet.create({
   // Supporting acts
   supportSection: { paddingHorizontal: 24, paddingBottom: 24 },
   supportDivider: { height: 1, backgroundColor: Ink.line, marginBottom: 8 },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: Ink.textFaint, marginTop: 20, marginBottom: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: '600', color: Ink.textFaint, marginTop: 20, marginBottom: 12 },
   supportRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 14 },
   supportDay: { fontSize: 8, color: Ink.textFaint, width: 28 },
   supportName: { fontSize: 11, fontWeight: '700', color: Ink.textDim, flex: 1 },

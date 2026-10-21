@@ -11,6 +11,7 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@expo-google-fonts/unbounded": "^0.4.1",
     "@expo/vector-icons": "^15.0.3",
     "expo": "^57.0.0",
     "expo-constants": "~57.0.22",
