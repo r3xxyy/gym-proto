@@ -32,10 +32,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="cardio"
-        options={{
-          title: 'Cardio',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="figure.run" color={color} />,
-        }}
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="WeeklyBgShape"
+        options={{ href: null }}
       />
     </Tabs>
   );
