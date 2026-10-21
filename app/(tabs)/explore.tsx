@@ -1,3 +1,4 @@
+import { Ink } from '@/constants/theme';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -532,67 +533,67 @@ export default function StatsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#080810' },
+  root: { flex: 1, backgroundColor: Ink.bg },
   content: { padding: 20, paddingTop: 64, paddingBottom: 40 },
   empty: { justifyContent: 'center', alignItems: 'center' },
-  emptyText: { fontSize: 15, color: '#555' },
+  emptyText: { fontSize: 15, color: Ink.textFaint },
   screenTitle: { fontSize: 28, fontWeight: '700', marginBottom: 24, color: '#fff' },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, marginTop: 24 },
-  card: { backgroundColor: '#0e0e1c', borderRadius: 12, padding: 16, gap: 12 },
+  sectionTitle: { fontSize: 13, fontWeight: '600', color: Ink.textFaint, marginBottom: 8, marginTop: 24 },
+  card: { backgroundColor: Ink.raised, borderRadius: 12, padding: 16, gap: 12 },
 
   // Bar chart
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  barLabel: { width: 90, fontSize: 13, color: '#ccc' },
+  barLabel: { width: 90, fontSize: 13, color: Ink.text },
   barLabelLow: { color: '#FF3B30' },
   barTrack: { flex: 1, height: 8, backgroundColor: '#1a1a2e', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', backgroundColor: '#aaa', borderRadius: 4 },
   barFillLow: { backgroundColor: '#FF3B30' },
-  barCount: { width: 28, fontSize: 13, color: '#555', textAlign: 'right' },
+  barCount: { width: 28, fontSize: 13, color: Ink.textFaint, textAlign: 'right' },
   barCountLow: { color: '#FF3B30', fontWeight: '600' },
-  mevLabel: { width: 42, fontSize: 10, color: '#444', textAlign: 'right' },
-  mevNote: { fontSize: 10, color: '#444', marginTop: 4 },
+  mevLabel: { width: 42, fontSize: 10, color: Ink.textFaint, textAlign: 'right' },
+  mevNote: { fontSize: 10, color: Ink.textFaint, marginTop: 4 },
 
   // Week bars
   weekRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 120 },
   weekCol: { alignItems: 'center', gap: 4, flex: 1 },
   weekBarTrack: { width: 28, height: 60, backgroundColor: '#1a1a2e', borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
   weekBarFill: { width: '100%', backgroundColor: '#aaa', borderRadius: 4 },
-  weekCount: { fontSize: 14, fontWeight: '600', color: '#ccc' },
-  weekLabel: { fontSize: 10, color: '#555', textAlign: 'center' },
+  weekCount: { fontSize: 14, fontWeight: '600', color: Ink.text },
+  weekLabel: { fontSize: 10, color: Ink.textFaint, textAlign: 'center' },
 
   // Coach
-  coachBtn: { marginTop: 32, paddingVertical: 16, borderWidth: 1, borderColor: '#2a2a40', borderRadius: 8, alignItems: 'center' },
-  coachBtnText: { fontSize: 13, fontWeight: '600', letterSpacing: 3, color: '#ccc', textTransform: 'uppercase' },
+  coachBtn: { marginTop: 32, paddingVertical: 16, borderWidth: 1, borderColor: Ink.line, borderRadius: 8, alignItems: 'center' },
+  coachBtnText: { fontSize: 13, fontWeight: '600', color: Ink.text },
 
   // PRs
-  prRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#1a1a2e' },
-  prName: { fontSize: 14, color: '#ccc', fontWeight: '500' },
-  prDate: { fontSize: 11, color: '#444', marginTop: 2 },
+  prRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: Ink.line },
+  prName: { fontSize: 14, color: Ink.text, fontWeight: '500' },
+  prDate: { fontSize: 11, color: Ink.textFaint, marginTop: 2 },
   prWeight: { fontSize: 18, fontWeight: '700', color: '#fff' },
 
   // Section headers (collapsible)
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 8, paddingVertical: 4 },
-  sectionChevron: { fontSize: 18, color: '#444' },
+  sectionChevron: { fontSize: 18, color: Ink.textFaint },
 
   // Badge grid
-  badgeFamilyLabel: { fontSize: 10, color: '#444', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 10 },
+  badgeFamilyLabel: { fontSize: 10, color: Ink.textFaint, marginBottom: 10 },
   badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  badgeItem: { width: 95, backgroundColor: '#0e0e1c', borderRadius: 10, borderWidth: 1, borderColor: '#1e1e30', padding: 10, alignItems: 'center', gap: 6 },
-  badgeItemLocked: { borderColor: '#111', backgroundColor: '#0a0a14' },
+  badgeItem: { width: 95, backgroundColor: Ink.raised, borderRadius: 10, borderWidth: 1, borderColor: Ink.line, padding: 10, alignItems: 'center', gap: 6 },
+  badgeItemLocked: { borderColor: Ink.line, backgroundColor: '#0a0a14' },
   badgeIcon: { fontSize: 32, lineHeight: 40 },
   badgeIconLocked: { opacity: 0.2 },
-  badgeName: { fontSize: 10, color: '#ccc', textAlign: 'center', lineHeight: 13, fontWeight: '600', letterSpacing: 0.3 },
-  badgeNameLocked: { color: '#333' },
+  badgeName: { fontSize: 10, color: Ink.text, textAlign: 'center', lineHeight: 13, fontWeight: '600', letterSpacing: 0.3 },
+  badgeNameLocked: { color: Ink.textFaint },
 });
 
 // ─── Badge Modal Styles ───────────────────────────────────────────────────────
 
 const bm = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 40 },
-  card: { backgroundColor: '#0e0e1c', borderWidth: 1, borderColor: '#2a2a40', borderRadius: 16, padding: 32, alignItems: 'center', gap: 12, width: '100%' },
+  card: { backgroundColor: Ink.raised, borderWidth: 1, borderColor: Ink.line, borderRadius: 16, padding: 32, alignItems: 'center', gap: 12, width: '100%' },
   icon:   { fontSize: 80, lineHeight: 96 },
-  name:   { fontSize: 22, fontWeight: '700', color: '#fff', letterSpacing: 1, textAlign: 'center' },
-  flavour:{ fontSize: 14, color: '#777', textAlign: 'center', lineHeight: 22, fontStyle: 'italic' },
-  date:   { fontSize: 11, color: '#555', marginTop: 4 },
-  locked: { fontSize: 11, color: '#333', marginTop: 4, letterSpacing: 1, textTransform: 'uppercase' },
+  name:   { fontSize: 22, fontWeight: '700', color: '#fff', textAlign: 'center' },
+  flavour:{ fontSize: 14, color: Ink.textDim, textAlign: 'center', lineHeight: 22, fontStyle: 'italic' },
+  date:   { fontSize: 11, color: Ink.textFaint, marginTop: 4 },
+  locked: { fontSize: 11, color: Ink.textFaint, marginTop: 4, },
 });

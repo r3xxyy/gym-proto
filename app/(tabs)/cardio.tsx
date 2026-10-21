@@ -1,3 +1,4 @@
+import { Ink } from '@/constants/theme';
 import { useEffect, useRef, useState } from 'react';
 import {
   ScrollView,
@@ -503,66 +504,66 @@ const s = StyleSheet.create({
   // Home
   homeContent: { padding: 16, paddingBottom: 40 },
   startBtn: { backgroundColor: '#000', paddingVertical: 18, borderRadius: 8, alignItems: 'center', marginBottom: 24 },
-  startBtnText: { color: '#fff', fontSize: 13, fontWeight: '700', letterSpacing: 4 },
-  empty: { fontSize: 14, color: '#aaa', textAlign: 'center', marginTop: 40 },
+  startBtnText: { color: '#fff', fontSize: 13, fontWeight: '700', },
+  empty: { fontSize: 14, color: Ink.textDim, textAlign: 'center', marginTop: 40 },
 
   sessionCard: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 10, padding: 14 },
   sessionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   sessionEmoji: { fontSize: 24 },
-  sessionName: { fontSize: 15, fontWeight: '600', color: '#222' },
-  sessionDate: { fontSize: 12, color: '#aaa', marginTop: 1 },
-  sessionParams: { fontSize: 12, color: '#888', marginTop: 3 },
-  sessionDuration: { fontSize: 16, fontWeight: '700', color: '#333', marginRight: 4 },
+  sessionName: { fontSize: 15, fontWeight: '600', color: Ink.textFaint },
+  sessionDate: { fontSize: 12, color: Ink.textDim, marginTop: 1 },
+  sessionParams: { fontSize: 12, color: Ink.textDim, marginTop: 3 },
+  sessionDuration: { fontSize: 16, fontWeight: '700', color: Ink.textFaint, marginRight: 4 },
   deleteBtn: { padding: 4 },
-  deleteBtnText: { fontSize: 13, color: '#ccc' },
+  deleteBtnText: { fontSize: 13, color: Ink.text },
 
   // Select
   selectContent: { padding: 16 },
   exerciseRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 8, gap: 14 },
   exerciseEmoji: { fontSize: 24 },
-  exerciseName: { flex: 1, fontSize: 16, fontWeight: '500', color: '#222' },
-  exerciseChevron: { fontSize: 20, color: '#ccc' },
+  exerciseName: { flex: 1, fontSize: 16, fontWeight: '500', color: Ink.textFaint },
+  exerciseChevron: { fontSize: 20, color: Ink.text },
 
   // Active
   timerBar: { paddingTop: 60, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee', alignItems: 'center', gap: 4 },
   timerEmoji: { fontSize: 28 },
-  timerExercise: { fontSize: 13, color: '#999', textTransform: 'uppercase', letterSpacing: 1 },
-  timerTime: { fontSize: 52, fontWeight: '200', letterSpacing: 4 },
+  timerExercise: { fontSize: 13, color: Ink.textDim, },
+  timerTime: { fontSize: 52, fontWeight: '200', },
   timerRounds: { fontSize: 13, color: '#007AFF', fontWeight: '600' },
 
   activeContent: { padding: 20, paddingBottom: 40 },
 
   paramRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 8, justifyContent: 'space-between' },
-  paramLabel: { fontSize: 15, color: '#333', fontWeight: '500' },
+  paramLabel: { fontSize: 15, color: Ink.textFaint, fontWeight: '500' },
   paramInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   paramInput: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, fontSize: 16, textAlign: 'right', minWidth: 72, color: '#000' },
-  paramUnit: { fontSize: 13, color: '#aaa', minWidth: 36 },
+  paramUnit: { fontSize: 13, color: Ink.textDim, minWidth: 36 },
 
   roundCounter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24, backgroundColor: '#fff', borderRadius: 10, padding: 16, marginBottom: 8 },
   roundBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   roundBtnDisabled: { backgroundColor: '#eee' },
   roundBtnText: { fontSize: 20, color: '#fff', fontWeight: '300' },
-  roundLabel: { fontSize: 15, fontWeight: '600', color: '#333' },
+  roundLabel: { fontSize: 15, fontWeight: '600', color: Ink.textFaint },
 
   stopBtn: { backgroundColor: '#000', paddingVertical: 18, borderRadius: 8, alignItems: 'center', marginTop: 16 },
-  stopBtnText: { color: '#fff', fontSize: 13, fontWeight: '700', letterSpacing: 4 },
+  stopBtnText: { color: '#fff', fontSize: 13, fontWeight: '700', },
   discardBtn: { paddingVertical: 14, alignItems: 'center', marginTop: 8 },
-  discardBtnText: { fontSize: 14, color: '#aaa' },
+  discardBtnText: { fontSize: 14, color: Ink.textDim },
 
   // Summary
   summaryExercise: { fontSize: 26, fontWeight: '700', color: '#111', marginBottom: 4 },
-  summaryDate: { fontSize: 13, color: '#aaa', marginBottom: 24 },
-  summaryLabel: { fontSize: 12, color: '#999', textTransform: 'uppercase', letterSpacing: 1, marginTop: 16 },
-  summaryValue: { fontSize: 28, fontWeight: '200', letterSpacing: 2, color: '#111' },
+  summaryDate: { fontSize: 13, color: Ink.textDim, marginBottom: 24 },
+  summaryLabel: { fontSize: 12, color: Ink.textDim, marginTop: 16 },
+  summaryValue: { fontSize: 28, fontWeight: '200', color: '#111' },
 });
 
 const tab = StyleSheet.create({
   container: { backgroundColor: '#fff', borderRadius: 12, padding: 20, marginBottom: 8, alignItems: 'center', gap: 10 },
-  phase: { fontSize: 13, fontWeight: '800', letterSpacing: 6, textTransform: 'uppercase' },
-  countdown: { fontSize: 80, fontWeight: '100', letterSpacing: 4, lineHeight: 88 },
+  phase: { fontSize: 13, fontWeight: '800', letterSpacing: 6 },
+  countdown: { fontSize: 80, fontWeight: '100', lineHeight: 88 },
   barTrack: { width: '100%', height: 6, backgroundColor: '#f0f0f0', borderRadius: 3, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 3 },
-  rounds: { fontSize: 13, color: '#999', letterSpacing: 1 },
+  rounds: { fontSize: 13, color: Ink.textDim, },
   btn: { marginTop: 4, paddingVertical: 12, paddingHorizontal: 36, borderWidth: 1.5, borderRadius: 8, alignItems: 'center' },
-  btnText: { fontSize: 13, fontWeight: '700', letterSpacing: 4 },
+  btnText: { fontSize: 13, fontWeight: '700', },
 });

@@ -18,6 +18,8 @@ import {
 import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { Swipeable, GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ActRow } from '@/components/act-row';
+import { Ink } from '@/constants/theme';
 import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { ALL_BADGES, checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
@@ -2279,18 +2281,15 @@ export default function HomeScreen() {
 
           {/* ── Poster Header ── */}
           <View style={poster.header}>
-            <View>
-              <Text style={poster.brand}>GYM PROTO</Text>
-              <Text style={poster.phase}>WEEK {currentWeek}  LINE UP</Text>
-            </View>
+            <Text style={poster.phase}>Week {currentWeek} line-up</Text>
             <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'home'; setScreen('history'); }}>
-              <Text style={poster.histBtnText}>HISTORY</Text>
+              <Text style={poster.histBtnText}>History</Text>
             </TouchableOpacity>
           </View>
 
           {/* ── Venue Picker — always visible ── */}
           <View style={[poster.venueRow, { paddingHorizontal: 24 }]}>
-            <Text style={poster.venueLabel}>VENUE</Text>
+            <Text style={poster.venueLabel}>Venue</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {knownGyms.map(gym => (
@@ -2311,7 +2310,7 @@ export default function HomeScreen() {
                     if (val?.trim()) selectGym(val.trim());
                   })}
                 >
-                  <Text style={poster.venueChipText}>+ NEW</Text>
+                  <Text style={poster.venueChipText}>+ New</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -2327,23 +2326,20 @@ export default function HomeScreen() {
                 return (
                   <>
                     <View style={poster.supportSection}>
-                      <Text style={[poster.headlinerLabel, { textAlign: 'center', marginBottom: 24, marginTop: 20 }]}>— THIS WEEK —</Text>
+                      <Text style={poster.sectionTitle}>This week</Text>
                       {WEEK_DAYS.map((day, i) => {
                         const done = completedDays.includes(day);
-                        const isRest = done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay);
+                        const isRest = !!(done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay));
                         return (
-                          <View key={day} style={[poster.supportRow, i < WEEK_DAYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' }]}>
-                            <TouchableOpacity style={{ flex: 1 }} onPress={() => !done && setSelectedDay(day)} disabled={done} activeOpacity={0.6}>
-                              <Text style={[poster.supportName, done && { opacity: 0.2 }]}>{POSTER_NAMES[day]}</Text>
-                            </TouchableOpacity>
-                            {done && !isRest && <Text style={poster.supportDone}>✓</Text>}
-                            {done && isRest && <Text style={poster.supportDone}>REST</Text>}
-                            {!done && (
-                              <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => logRestDay(day)}>
-                                <Text style={{ fontSize: 8, letterSpacing: 2, color: '#333', textTransform: 'uppercase' }}>REST</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
+                          <ActRow
+                            key={day}
+                            day={day}
+                            done={done}
+                            isRest={isRest}
+                            last={i === WEEK_DAYS.length - 1}
+                            onSelect={() => setSelectedDay(day)}
+                            onRest={() => logRestDay(day)}
+                          />
                         );
                       })}
                     </View>
@@ -2375,15 +2371,15 @@ export default function HomeScreen() {
                     onPress={() => setExpandedDay(headlineExpanded ? null : headlineDay)}
                     activeOpacity={0.7}
                   >
-                    <Text style={poster.headlinerLabel}>— TONIGHT —</Text>
+                    <Text style={poster.headlinerLabel}>Tonight</Text>
                     <View style={poster.headlinerBox}>
                       <AnimatedPosterName
                         day={headlineDay}
                         isActive={!headlineDone}
-                        style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? 'rgba(255,255,255,0.2)' : '#fff' }]}
+                        style={[poster.artistName, DAY_TEXT_STYLES[headlineDay], { color: headlineDone ? Ink.textFaint : POSTER_COLORS[headlineDay] }]}
                       />
                     </View>
-                    <Text style={poster.headlinerSub}>{SPLIT[headlineDay].toUpperCase()}</Text>
+                    <Text style={poster.headlinerSub}>{SPLIT[headlineDay]}</Text>
                   </TouchableOpacity>
 
                   {/* ── Setlist ── */}
@@ -2402,8 +2398,8 @@ export default function HomeScreen() {
                           >
                             <Text style={poster.lineupIdx}>{String(i + 1).padStart(2, '0')}</Text>
                             <View style={{ flex: 1, minWidth: 0 }}>
-                              <Text style={poster.lineupName} numberOfLines={2}>{ex.name.toUpperCase()}</Text>
-                              <Text style={poster.lineupMuscle}>{ex.muscles.split(',')[0].trim().toUpperCase()}</Text>
+                              <Text style={poster.lineupName} numberOfLines={2}>{ex.name}</Text>
+                              <Text style={poster.lineupMuscle}>{ex.muscles.split(',')[0].trim()}</Text>
                               {!headlineDone && (() => {
                                 const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, SPLIT[headlineDay], history, activeGym);
                                 if (!pi) return null;
@@ -2488,23 +2484,20 @@ export default function HomeScreen() {
                   <View style={poster.supportSection}>
                     <View style={poster.supportDivider} />
                     {supportDays.map((day, i) => {
-                      const done = completedDays.includes(day);
-                      const isRest = done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay);
-                      return (
-                        <View key={day} style={[poster.supportRow, i < supportDays.length - 1 && { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' }]}>
-                          <TouchableOpacity style={{ flex: 1 }} onPress={() => !done && setSelectedDay(day)} disabled={done} activeOpacity={0.6}>
-                            <Text style={[poster.supportName, done && { opacity: 0.2 }]}>{POSTER_NAMES[day]}</Text>
-                          </TouchableOpacity>
-                          {done && !isRest && <Text style={poster.supportDone}>✓</Text>}
-                          {done && isRest && <Text style={poster.supportDone}>REST</Text>}
-                          {!done && (
-                            <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => logRestDay(day)}>
-                              <Text style={{ fontSize: 8, letterSpacing: 2, color: '#333', textTransform: 'uppercase' }}>REST</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      );
-                    })}
+                        const done = completedDays.includes(day);
+                        const isRest = !!(done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay));
+                        return (
+                          <ActRow
+                            key={day}
+                            day={day}
+                            done={done}
+                            isRest={isRest}
+                            last={i === supportDays.length - 1}
+                            onSelect={() => setSelectedDay(day)}
+                            onRest={() => logRestDay(day)}
+                          />
+                        );
+                      })}
                   </View>
                   {completedDays.length === WEEK_DAYS.length && (
                     <TouchableOpacity style={[poster.coachBtn, { marginHorizontal: 24 }]} onPress={() => {
@@ -2587,8 +2580,8 @@ export default function HomeScreen() {
           {/* ── Footer — START WORKOUT only ── */}
           {selectedDay !== null && !completedDays.includes(selectedDay) && (
             <View style={poster.footer}>
-              <TouchableOpacity style={poster.startBtn} onPress={startWorkout}>
-                <Text style={poster.startBtnText}>START WORKOUT</Text>
+              <TouchableOpacity style={[poster.startBtn, { backgroundColor: POSTER_COLORS[selectedDay] }]} onPress={startWorkout} accessibilityRole="button">
+                <Text style={poster.startBtnText}>Start workout</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -2635,7 +2628,7 @@ export default function HomeScreen() {
           </View>
           {/* ── Venue row — reactive: changing gym updates all prev refs inline ── */}
           <View style={[poster.venueRow, { paddingHorizontal: 16 }]}>
-            <Text style={poster.venueLabel}>VENUE</Text>
+            <Text style={poster.venueLabel}>Venue</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {knownGyms.map(gym => (
@@ -2656,7 +2649,7 @@ export default function HomeScreen() {
                     if (val?.trim()) selectGym(val.trim());
                   })}
                 >
-                  <Text style={poster.venueChipText}>+ NEW</Text>
+                  <Text style={poster.venueChipText}>+ New</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -2893,226 +2886,227 @@ export default function HomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#080810' },
+  root: { flex: 1, backgroundColor: Ink.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
   title: { fontSize: 32, fontWeight: 'bold' },
-  workoutName: { fontSize: 18, color: '#666', marginBottom: 8 },
+  workoutName: { fontSize: 18, color: Ink.textFaint, marginBottom: 8 },
   button: { backgroundColor: '#000', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 8 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
   timerBar: {
-    backgroundColor: '#080810',
+    backgroundColor: Ink.bg,
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 20,
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#111',
+    borderBottomColor: Ink.line,
     gap: 6,
   },
-  timerBarTitle: { fontSize: 11, color: '#333', textTransform: 'uppercase', letterSpacing: 4, marginTop: 4, fontWeight: '700' },
-  timerBarTime: { fontSize: 42, fontWeight: '200', letterSpacing: 3, color: '#fff' },
-  timerBarRest: { fontSize: 13, color: '#555' },
-  restBtn: { borderWidth: 1, borderColor: '#2a2a40', paddingVertical: 12, borderRadius: 4, marginTop: 4, alignSelf: 'stretch', alignItems: 'center' },
-  restBtnText: { fontSize: 14, fontWeight: '600', color: '#ccc' },
+  timerBarTitle: { fontSize: 11, color: Ink.textFaint, marginTop: 4, fontWeight: '700' },
+  timerBarTime: { fontSize: 42, fontWeight: '200', color: '#fff' },
+  timerBarRest: { fontSize: 13, color: Ink.textFaint },
+  restBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, marginTop: 4, alignSelf: 'stretch', alignItems: 'center' },
+  restBtnText: { fontSize: 14, fontWeight: '600', color: Ink.text },
   extendRestRow: { flexDirection: 'row', gap: 8, marginTop: 6, alignSelf: 'stretch' },
-  extendRestBtn: { flex: 1, borderWidth: 1, borderColor: '#1e1e30', paddingVertical: 8, borderRadius: 4, alignItems: 'center' },
-  extendRestBtnText: { fontSize: 13, fontWeight: '500', color: '#555' },
-  endBtn: { borderWidth: 1, borderColor: '#151520', paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
-  endBtnText: { fontSize: 13, color: '#2a2a40', textAlign: 'center', letterSpacing: 2 },
-  addExBtn: { borderWidth: 1, borderColor: '#1e1e30', paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
-  addExBtnText: { fontSize: 13, color: '#444', letterSpacing: 1 },
+  extendRestBtn: { flex: 1, borderWidth: 1, borderColor: Ink.line, paddingVertical: 8, borderRadius: 4, alignItems: 'center' },
+  extendRestBtnText: { fontSize: 13, fontWeight: '500', color: Ink.textFaint },
+  endBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
+  endBtnText: { fontSize: 13, color: Ink.textFaint, textAlign: 'center', },
+  addExBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 12, borderRadius: 4, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
+  addExBtnText: { fontSize: 13, color: Ink.textFaint, },
   list: { padding: 16, paddingBottom: 32 },
-  summaryLabel: { fontSize: 11, color: '#444', textTransform: 'uppercase', letterSpacing: 2 },
-  summaryValue: { fontSize: 36, fontWeight: '200', letterSpacing: 3, marginBottom: 8, color: '#fff' },
+  summaryLabel: { fontSize: 11, color: Ink.textFaint, },
+  summaryValue: { fontSize: 36, fontWeight: '200', marginBottom: 8, color: '#fff' },
   homeHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   homeFooter: { padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee' },
-  historyBtn: { paddingVertical: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: '#2a2a40', borderRadius: 4 },
-  historyBtnText: { fontSize: 13, color: '#555' },
-  historyHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: '#080810', borderBottomWidth: 1, borderBottomColor: '#111', flexDirection: 'row', alignItems: 'center', gap: 16 },
-  historyBack: { fontSize: 16, color: '#555' },
-  historyTitle: { fontSize: 16, fontWeight: '700', color: '#fff', letterSpacing: 1 },
+  historyBtn: { paddingVertical: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: Ink.line, borderRadius: 4 },
+  historyBtnText: { fontSize: 13, color: Ink.textFaint },
+  historyHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12, backgroundColor: Ink.bg, borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', alignItems: 'center', gap: 16 },
+  historyBack: { fontSize: 16, color: Ink.textFaint },
+  historyTitle: { fontSize: 16, fontWeight: '700', color: '#fff', },
 });
 
 const hist = StyleSheet.create({
   sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, marginTop: 8 },
   workoutName: { fontSize: 16, fontWeight: '600' },
-  date: { fontSize: 12, color: '#999' },
-  meta: { fontSize: 12, color: '#aaa', marginBottom: 10 },
+  date: { fontSize: 12, color: Ink.textDim },
+  meta: { fontSize: 12, color: Ink.textDim, marginBottom: 10 },
 });
 
 const coll = StyleSheet.create({
-  group: { backgroundColor: '#0e0e1c', borderRadius: 4, marginBottom: 10, overflow: 'hidden' },
+  group: { backgroundColor: Ink.raised, borderRadius: 4, marginBottom: 10, overflow: 'hidden' },
   groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  groupName: { fontSize: 13, fontWeight: '700', color: '#ccc', textTransform: 'uppercase', letterSpacing: 2 },
-  chevron: { fontSize: 12, color: '#333' },
-  dateRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#131328' },
-  dateText: { fontSize: 13, color: '#888' },
-  dateGym: { fontSize: 8, letterSpacing: 2, color: '#333', textTransform: 'uppercase', marginTop: 2 },
-  dateMeta: { fontSize: 11, color: '#333', marginRight: 8 },
-  chevronSm: { fontSize: 10, color: '#2a2a40' },
-  cardList: { backgroundColor: '#080810', padding: 12, gap: 0 },
+  groupName: { fontSize: 13, fontWeight: '700', color: Ink.text, },
+  chevron: { fontSize: 12, color: Ink.textFaint },
+  dateRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: Ink.line },
+  dateText: { fontSize: 13, color: Ink.textDim },
+  dateGym: { fontSize: 8, color: Ink.textFaint, marginTop: 2 },
+  dateMeta: { fontSize: 11, color: Ink.textFaint, marginRight: 8 },
+  chevronSm: { fontSize: 10, color: Ink.textFaint },
+  cardList: { backgroundColor: Ink.bg, padding: 12, gap: 0 },
   deleteBtn: { backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'center', width: 80 },
   deleteBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   dateRowSelected: { backgroundColor: '#0a1828' },
-  selectCircle: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#2a2a40', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  selectCircle: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   selectCircleFilled: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  mergeBtn: { marginTop: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#2a2a40', borderRadius: 4, alignItems: 'center' },
-  mergeBtnText: { fontSize: 12, color: '#666', letterSpacing: 2, textTransform: 'uppercase' },
+  mergeBtn: { marginTop: 12, paddingVertical: 10, borderWidth: 1, borderColor: Ink.line, borderRadius: 4, alignItems: 'center' },
+  mergeBtnText: { fontSize: 12, color: Ink.textFaint, },
 });
 
 const histCard = StyleSheet.create({
-  setValue: { fontSize: 14, color: '#888', minWidth: 56, textAlign: 'center', fontVariant: ['tabular-nums'] },
-  editInput: { fontSize: 14, color: '#fff', minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'], borderBottomWidth: 1, borderBottomColor: '#2a2a40', paddingVertical: 2 },
-  noteText: { fontSize: 12, color: '#444', marginTop: 6, lineHeight: 16 },
+  setValue: { fontSize: 14, color: Ink.textDim, minWidth: 56, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  editInput: { fontSize: 14, color: '#fff', minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'], borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 2 },
+  noteText: { fontSize: 12, color: Ink.textFaint, marginTop: 6, lineHeight: 16 },
 });
 
 const summ = StyleSheet.create({
-  exRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#111' },
-  exName: { fontSize: 13, color: '#666', flex: 1 },
-  exTime: { fontSize: 13, color: '#555', fontVariant: ['tabular-nums'] },
+  exRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Ink.line },
+  exName: { fontSize: 13, color: Ink.textFaint, flex: 1 },
+  exTime: { fontSize: 13, color: Ink.textFaint, fontVariant: ['tabular-nums'] },
 });
 
 const poster = StyleSheet.create({
-  header: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottomWidth: 1, borderBottomColor: '#111' },
+  header: { paddingTop: 64, paddingHorizontal: 24, paddingBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: Ink.line },
   brand: { fontSize: 10, fontWeight: '800', letterSpacing: 7, color: '#fff' },
-  phase: { fontSize: 16, fontWeight: '700', letterSpacing: 5, color: '#fff', marginTop: 6 },
-  histBtn: { paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: '#222' },
-  histBtnText: { fontSize: 9, letterSpacing: 3, color: '#444' },
+  phase: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5, color: Ink.text },
+  histBtn: { minHeight: 40, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 20 },
+  histBtnText: { fontSize: 14, fontWeight: '600', color: Ink.textDim },
   slot: { paddingVertical: 20, paddingHorizontal: 24, alignItems: 'center' },
-  artistName: { textAlign: 'center', textTransform: 'uppercase' },
-  todayTag: { fontSize: 9, letterSpacing: 5, marginTop: 8, color: 'rgba(255,255,255,0.3)' },
+  artistName: { textAlign: 'center' },
+  todayTag: { fontSize: 12, marginTop: 8, color: Ink.textFaint },
   cardList: { paddingHorizontal: 20, paddingBottom: 4, paddingTop: 4 },
-  lineupRow: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  lineupDropset: { fontSize: 11, color: '#555', fontVariant: ['tabular-nums'], marginTop: 3, textAlign: 'right' },
-  lineupIdx: { fontSize: 10, color: '#555', fontVariant: ['tabular-nums'], letterSpacing: 1, width: 22 },
-  lineupName: { fontSize: 15, fontWeight: '700', color: '#e8e8e8', letterSpacing: 1.5 },
-  lineupMuscle: { fontSize: 9, color: '#555', letterSpacing: 3, marginTop: 4 },
-  lineupWeight: { fontSize: 13, fontWeight: '600', color: '#888', letterSpacing: 0.5, fontVariant: ['tabular-nums'] },
-  lineupSets: { fontSize: 12, color: '#999', fontVariant: ['tabular-nums'] },
-  lineupRemove: { fontSize: 10, color: '#333', marginTop: 6 },
-  lineupPrevRef: { fontSize: 10, color: '#ccc', marginTop: 4, fontVariant: ['tabular-nums'], letterSpacing: 0.3 },
-  darkCard: { backgroundColor: '#0c0c18', borderRadius: 6, padding: 14, marginBottom: 8, borderLeftWidth: 2 },
-  cardName: { fontSize: 13, fontWeight: '600', color: '#ccc', flex: 1 },
-  cardBadge: { fontSize: 9, letterSpacing: 2, color: '#333', textTransform: 'uppercase' },
-  cardMuscles: { fontSize: 11, color: '#333', marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
-  cardTarget: { fontSize: 12, color: '#555', marginTop: 6 },
-  cardCue: { fontSize: 11, color: '#2a2a40', fontStyle: 'italic', marginTop: 4 },
-  cardSets: { fontSize: 12, color: '#666', marginTop: 6 },
-  coachBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', alignItems: 'center' },
-  coachBtnText: { fontSize: 11, letterSpacing: 5, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
-  weekCoachBtn: { margin: 16, paddingVertical: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center' },
-  weekCoachBtnText: { fontSize: 11, letterSpacing: 5, color: '#fff', fontWeight: '700' },
-  swapSheet: { backgroundColor: '#0f0f1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, borderTopWidth: 1, borderColor: '#1e1e30' },
-  swapTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 5, color: '#444', marginBottom: 12 },
-  swapSearch: { backgroundColor: '#16162a', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, fontSize: 14, color: '#ccc', marginBottom: 12 },
-  swapOption: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
-  swapOptName: { fontSize: 15, fontWeight: '500', color: '#ccc' },
-  swapOptMuscles: { fontSize: 11, color: '#333', marginTop: 2, textTransform: 'uppercase', letterSpacing: 1 },
-  swapEmpty: { fontSize: 13, color: '#333', paddingVertical: 16 },
-  swapClose: { marginTop: 16, paddingVertical: 14, borderWidth: 1, borderColor: '#1e1e30', alignItems: 'center' },
-  swapCloseText: { fontSize: 10, letterSpacing: 4, color: '#333' },
-  footer: { padding: 16, paddingBottom: 32, backgroundColor: '#080810', borderTopWidth: 1, borderTopColor: '#0f0f18' },
-  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  venueLabel: { fontSize: 8, letterSpacing: 4, color: '#333', textTransform: 'uppercase' },
-  venueChip: { paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: '#1a1a2e' },
-  venueChipActive: { borderColor: '#fff' },
-  venueChipText: { fontSize: 9, letterSpacing: 2, color: '#333' },
-  venueChipTextActive: { color: '#fff' },
-  startBtn: { paddingVertical: 18, alignItems: 'center', borderWidth: 1, borderColor: '#222' },
-  startBtnText: { color: '#fff', fontSize: 11, letterSpacing: 7, fontWeight: '600' },
+  lineupRow: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  lineupDropset: { fontSize: 12, color: Ink.textFaint, fontVariant: ['tabular-nums'], marginTop: 3, textAlign: 'right' },
+  lineupIdx: { fontSize: 12, color: Ink.textFaint, fontVariant: ['tabular-nums'], width: 24 },
+  lineupName: { fontSize: 16, fontWeight: '700', color: Ink.text, letterSpacing: 0.3 },
+  lineupMuscle: { fontSize: 12, color: Ink.textFaint, marginTop: 4, textTransform: 'capitalize' },
+  lineupWeight: { fontSize: 15, fontWeight: '600', color: Ink.textDim, fontVariant: ['tabular-nums'] },
+  lineupSets: { fontSize: 13, color: Ink.textDim, fontVariant: ['tabular-nums'] },
+  lineupRemove: { fontSize: 12, color: Ink.textFaint, marginTop: 6 },
+  lineupPrevRef: { fontSize: 12, color: Ink.textDim, marginTop: 4, fontVariant: ['tabular-nums'] },
+  darkCard: { backgroundColor: Ink.raised, borderRadius: 10, padding: 14, marginBottom: 8, borderLeftWidth: 3 },
+  cardName: { fontSize: 15, fontWeight: '600', color: Ink.text, flex: 1 },
+  cardBadge: { fontSize: 12, color: Ink.textFaint },
+  cardMuscles: { fontSize: 12, color: Ink.textFaint, marginTop: 4 },
+  cardTarget: { fontSize: 13, color: Ink.textDim, marginTop: 6 },
+  cardCue: { fontSize: 12, color: Ink.textFaint, fontStyle: 'italic', marginTop: 4 },
+  cardSets: { fontSize: 13, color: Ink.textDim, marginTop: 6 },
+  coachBtn: { marginTop: 4, marginBottom: 12, minHeight: 48, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 12, alignItems: 'center' },
+  coachBtnText: { fontSize: 15, color: Ink.text, fontWeight: '600' },
+  weekCoachBtn: { margin: 16, minHeight: 48, justifyContent: 'center', borderWidth: 1, borderColor: Ink.textDim, borderRadius: 12, alignItems: 'center' },
+  weekCoachBtnText: { fontSize: 15, color: Ink.text, fontWeight: '700' },
+  swapSheet: { backgroundColor: Ink.raised, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, borderTopWidth: 1, borderColor: Ink.line },
+  swapTitle: { fontSize: 18, fontWeight: '700', color: Ink.text, marginBottom: 12 },
+  swapSearch: { backgroundColor: Ink.bg, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, fontSize: 16, color: Ink.text, marginBottom: 12 },
+  swapOption: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Ink.line },
+  swapOptName: { fontSize: 16, fontWeight: '500', color: Ink.text },
+  swapOptMuscles: { fontSize: 12, color: Ink.textFaint, marginTop: 2, textTransform: 'capitalize' },
+  swapEmpty: { fontSize: 14, color: Ink.textFaint, paddingVertical: 16 },
+  swapClose: { marginTop: 16, minHeight: 48, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 12, alignItems: 'center' },
+  swapCloseText: { fontSize: 15, fontWeight: '600', color: Ink.textDim },
+  footer: { padding: 16, paddingBottom: 32, backgroundColor: Ink.bg, borderTopWidth: 1, borderTopColor: Ink.line },
+  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, marginBottom: 6 },
+  venueLabel: { fontSize: 13, color: Ink.textFaint },
+  venueChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 18 },
+  venueChipActive: { backgroundColor: Ink.text, borderColor: Ink.text },
+  venueChipText: { fontSize: 13, fontWeight: '600', color: Ink.textDim },
+  venueChipTextActive: { color: Ink.bg },
+  startBtn: { minHeight: 56, justifyContent: 'center', alignItems: 'center', borderRadius: 14 },
+  startBtnText: { color: Ink.bg, fontSize: 17, fontWeight: '800' },
   cardRemove: { position: 'absolute', top: 8, right: 8, padding: 6 },
-  cardRemoveText: { fontSize: 11, color: '#333' },
-  addExBtn: { marginTop: 4, marginBottom: 12, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center' },
-  addExBtnText: { fontSize: 10, letterSpacing: 5, color: 'rgba(255,255,255,0.35)', fontWeight: '600' },
+  cardRemoveText: { fontSize: 13, color: Ink.textFaint },
+  addExBtn: { marginTop: 4, marginBottom: 12, minHeight: 48, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 12, alignItems: 'center' },
+  addExBtnText: { fontSize: 15, color: Ink.textDim, fontWeight: '600' },
   // Headliner slot
   headlinerSlot: { paddingVertical: 32, paddingHorizontal: 24, alignItems: 'center' },
-  headlinerLabel: { fontSize: 9, letterSpacing: 6, color: 'rgba(255,255,255,0.25)', marginBottom: 16, textTransform: 'uppercase' },
+  headlinerLabel: { fontSize: 13, color: Ink.textFaint, marginBottom: 16 },
   headlinerBox: { alignItems: 'center', marginBottom: 12 },
-  headlinerSub: { fontSize: 9, letterSpacing: 5, color: 'rgba(255,255,255,0.2)', marginTop: 8, textTransform: 'uppercase' },
+  headlinerSub: { fontSize: 14, color: Ink.textDim, marginTop: 8 },
   // Supporting acts
   supportSection: { paddingHorizontal: 24, paddingBottom: 24 },
-  supportDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: 20 },
+  supportDivider: { height: 1, backgroundColor: Ink.line, marginBottom: 8 },
+  sectionTitle: { fontSize: 13, fontWeight: '600', color: Ink.textFaint, marginTop: 20, marginBottom: 4 },
   supportRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 14 },
-  supportDay: { fontSize: 8, letterSpacing: 3, color: '#555', width: 28, textTransform: 'uppercase' },
-  supportName: { fontSize: 11, fontWeight: '700', letterSpacing: 2, color: '#777', textTransform: 'uppercase', flex: 1 },
-  supportDone: { fontSize: 10, color: '#333' },
+  supportDay: { fontSize: 8, color: Ink.textFaint, width: 28 },
+  supportName: { fontSize: 11, fontWeight: '700', color: Ink.textDim, flex: 1 },
+  supportDone: { fontSize: 10, color: Ink.textFaint },
 });
 
 const week = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 8 },
   rowDone: { backgroundColor: '#f5f5f5' },
   rowToday: { borderLeftWidth: 3, borderLeftColor: '#333' },
-  dayName: { fontSize: 16, fontWeight: '600', color: '#222' },
+  dayName: { fontSize: 16, fontWeight: '600', color: Ink.textFaint },
   dayNameDone: { color: '#bbb' },
-  chevron: { fontSize: 11, color: '#aaa' },
+  chevron: { fontSize: 11, color: Ink.textDim },
   cardList: { paddingHorizontal: 4, paddingBottom: 4 },
 });
 
 const swap = StyleSheet.create({
   btn: { marginTop: 10, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 14, borderWidth: 1, borderColor: '#ddd', borderRadius: 6 },
-  btnText: { fontSize: 12, color: '#888' },
+  btnText: { fontSize: 12, color: Ink.textDim },
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, gap: 12 },
   sheetTitle: { fontSize: 18, fontWeight: '600' },
-  sheetSub: { fontSize: 14, color: '#999', lineHeight: 20 },
+  sheetSub: { fontSize: 14, color: Ink.textDim, lineHeight: 20 },
   closeBtn: { marginTop: 8, paddingVertical: 12, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, alignItems: 'center' },
-  closeBtnText: { fontSize: 15, color: '#666' },
+  closeBtnText: { fontSize: 15, color: Ink.textFaint },
   option: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  optionName: { fontSize: 15, fontWeight: '500', color: '#222' },
-  optionMuscles: { fontSize: 12, color: '#999', marginTop: 2 },
+  optionName: { fontSize: 15, fontWeight: '500', color: Ink.textFaint },
+  optionMuscles: { fontSize: 12, color: Ink.textDim, marginTop: 2 },
 });
 
 const card = StyleSheet.create({
-  container: { backgroundColor: '#0e0e1c', borderRadius: 4, padding: 14, marginBottom: 8, borderLeftWidth: 2, borderLeftColor: '#1a1a2e' },
+  container: { backgroundColor: Ink.raised, borderRadius: 4, padding: 14, marginBottom: 8, borderLeftWidth: 2, borderLeftColor: '#1a1a2e' },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, gap: 8 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  name: { fontSize: 13, fontWeight: '700', flex: 1, color: '#ccc', textTransform: 'uppercase', letterSpacing: 1 },
-  badge: { fontSize: 9, color: '#333', letterSpacing: 2, textTransform: 'uppercase' },
-  muscles: { fontSize: 10, color: '#333', marginTop: 2, textTransform: 'uppercase', letterSpacing: 1 },
-  target: { fontSize: 11, color: '#444', marginBottom: 8, marginTop: 4 },
+  name: { fontSize: 13, fontWeight: '700', flex: 1, color: Ink.text, },
+  badge: { fontSize: 9, color: Ink.textFaint, },
+  muscles: { fontSize: 10, color: Ink.textFaint, marginTop: 2, },
+  target: { fontSize: 11, color: Ink.textFaint, marginBottom: 8, marginTop: 4 },
   setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  setNum: { width: 24, fontSize: 11, color: '#333', fontWeight: '700', textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
+  setNum: { width: 24, fontSize: 11, color: Ink.textFaint, fontWeight: '700', textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
   setInner: { flexDirection: 'row', alignItems: 'center' },
   input: { width: 56, fontSize: 14, textAlign: 'center', color: '#fff' },
-  sep: { fontSize: 13, color: '#333', marginHorizontal: 4 },
+  sep: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 4 },
   rpeInput: { width: 44 },
   dropGroup: { flexDirection: 'row', alignItems: 'center' },
-  arrow: { fontSize: 13, color: '#333', marginHorizontal: 6 },
-  dropRemove: { fontSize: 11, color: '#2a2a40', marginLeft: 4 },
+  arrow: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 6 },
+  dropRemove: { fontSize: 11, color: Ink.textFaint, marginLeft: 4 },
   dropBtn: { marginLeft: 10, justifyContent: 'center' },
   dropBtnText: { fontSize: 11, color: '#5a2a2a' },
   removeBtn: { width: 28, alignItems: 'center', marginLeft: 4 },
-  removeBtnText: { color: '#2a2a40', fontSize: 14 },
-  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: '#2a2a40', alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
+  removeBtnText: { color: Ink.textFaint, fontSize: 14 },
+  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
   confirmBtnDone: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  confirmBtnText: { fontSize: 13, color: '#2a2a40', fontWeight: '700' },
+  confirmBtnText: { fontSize: 13, color: Ink.textFaint, fontWeight: '700' },
   confirmBtnTextDone: { color: '#fff' },
   addSet: { marginTop: 4 },
-  addSetText: { fontSize: 11, color: '#2a2a40', letterSpacing: 1 },
-  notes: { fontSize: 13, color: '#444', marginTop: 8, borderBottomWidth: 1, borderBottomColor: '#1a1a2e', paddingVertical: 4 },
+  addSetText: { fontSize: 11, color: Ink.textFaint, },
+  notes: { fontSize: 13, color: Ink.textFaint, marginTop: 8, borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 4 },
   cue: { fontSize: 11, color: '#1e1e30', marginTop: 4 },
-  exTime: { fontSize: 11, color: '#333', marginTop: 4 },
-  swapHint: { fontSize: 9, color: '#2a4a7a', letterSpacing: 1, marginTop: 2 },
+  exTime: { fontSize: 11, color: Ink.textFaint, marginTop: 4 },
+  swapHint: { fontSize: 9, color: '#2a4a7a', marginTop: 2 },
 });
 
 // Active session card — dark concert poster treatment
 const aCard = StyleSheet.create({
-  container: { backgroundColor: '#0e0e1c', borderRadius: 4, borderLeftWidth: 2, borderLeftColor: '#1a1a2e', padding: 16, marginBottom: 12 },
+  container: { backgroundColor: Ink.raised, borderRadius: 4, borderLeftWidth: 2, borderLeftColor: '#1a1a2e', padding: 16, marginBottom: 12 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, gap: 8 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
-  name: { fontSize: 14, fontWeight: '800', flex: 1, color: '#e8e8e8', textTransform: 'uppercase', letterSpacing: 1.5 },
-  badge: { fontSize: 9, color: '#333', letterSpacing: 2, textTransform: 'uppercase' },
-  muscles: { fontSize: 10, color: '#333', marginTop: 2, textTransform: 'uppercase', letterSpacing: 1.5 },
-  target: { fontSize: 12, color: '#555', marginBottom: 10, marginTop: 6 },
+  name: { fontSize: 14, fontWeight: '800', flex: 1, color: '#e8e8e8' },
+  badge: { fontSize: 9, color: Ink.textFaint, },
+  muscles: { fontSize: 10, color: Ink.textFaint, marginTop: 2 },
+  target: { fontSize: 12, color: Ink.textFaint, marginBottom: 10, marginTop: 6 },
   setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  setNum: { width: 28, fontSize: 11, color: '#333', fontWeight: '700', letterSpacing: 1, textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
+  setNum: { width: 28, fontSize: 11, color: Ink.textFaint, fontWeight: '700', textAlign: 'center', marginRight: 4, fontVariant: ['tabular-nums'] },
   setNumConfirmed: { color: '#34C759' },
   setInner: { flexDirection: 'row', alignItems: 'center' },
   input: {
     width: 56,
     backgroundColor: '#131328',
     borderWidth: 1,
-    borderColor: '#1e1e30',
+    borderColor: Ink.line,
     borderRadius: 4,
     paddingVertical: 8,
     paddingHorizontal: 4,
@@ -3121,48 +3115,48 @@ const aCard = StyleSheet.create({
     textAlign: 'center',
     color: '#fff',
   },
-  sep: { fontSize: 13, color: '#333', marginHorizontal: 4 },
+  sep: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 4 },
   rpeInput: { width: 44 },
   dropGroup: { flexDirection: 'row', alignItems: 'center' },
-  arrow: { fontSize: 13, color: '#333', marginHorizontal: 6 },
-  dropRemove: { fontSize: 11, color: '#2a2a40', marginLeft: 4 },
+  arrow: { fontSize: 13, color: Ink.textFaint, marginHorizontal: 6 },
+  dropRemove: { fontSize: 11, color: Ink.textFaint, marginLeft: 4 },
   dropBtn: { marginLeft: 10, justifyContent: 'center' },
   dropBtnText: { fontSize: 11, color: '#5a2a2a', letterSpacing: 0.5 },
   removeBtn: { width: 28, alignItems: 'center', marginLeft: 4 },
-  removeBtnText: { color: '#2a2a40', fontSize: 14 },
-  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: '#2a2a40', alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
+  removeBtnText: { color: Ink.textFaint, fontSize: 14 },
+  confirmBtn: { width: 28, height: 28, borderRadius: 2, borderWidth: 1.5, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
   confirmBtnDone: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  confirmBtnText: { fontSize: 13, color: '#2a2a40', fontWeight: '700' },
+  confirmBtnText: { fontSize: 13, color: Ink.textFaint, fontWeight: '700' },
   confirmBtnTextDone: { color: '#fff' },
   addSet: { marginTop: 4 },
-  addSetText: { fontSize: 11, color: '#2a2a40', letterSpacing: 2, textTransform: 'uppercase' },
-  notes: { fontSize: 13, color: '#555', marginTop: 10, borderBottomWidth: 1, borderBottomColor: '#1a1a2e', paddingVertical: 6 },
-  cue: { fontSize: 11, color: '#555', marginTop: 6 },
-  prevRef: { fontSize: 10, color: '#ccc', marginTop: 3, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
-  exTime: { fontSize: 11, color: '#333', marginTop: 6 },
-  swapHint: { fontSize: 9, color: '#2a4a7a', letterSpacing: 1, marginTop: 2, textTransform: 'uppercase' },
+  addSetText: { fontSize: 11, color: Ink.textFaint, },
+  notes: { fontSize: 13, color: Ink.textFaint, marginTop: 10, borderBottomWidth: 1, borderBottomColor: Ink.line, paddingVertical: 6 },
+  cue: { fontSize: 11, color: Ink.textFaint, marginTop: 6 },
+  prevRef: { fontSize: 10, color: Ink.text, marginTop: 3, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
+  exTime: { fontSize: 11, color: Ink.textFaint, marginTop: 6 },
+  swapHint: { fontSize: 9, color: '#2a4a7a', marginTop: 2 },
   // Plate calculator
   plateCalc: { backgroundColor: '#0a0a18', borderRadius: 3, padding: 10, marginBottom: 10 },
   plateRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginBottom: 6 },
-  plateLabel: { fontSize: 10, color: '#444', letterSpacing: 1, textTransform: 'uppercase' as const, width: 28 },
-  plateInput: { width: 44, backgroundColor: '#131328', borderWidth: 1, borderColor: '#1e1e30', borderRadius: 3, paddingVertical: 4, paddingHorizontal: 4, fontSize: 12, fontWeight: '600' as const, textAlign: 'center' as const, color: '#aaa' },
-  plateResult: { fontSize: 12, color: '#888', letterSpacing: 0.3, fontVariant: ['tabular-nums' as const] },
+  plateLabel: { fontSize: 10, color: Ink.textFaint, width: 28 },
+  plateInput: { width: 44, backgroundColor: '#131328', borderWidth: 1, borderColor: Ink.line, borderRadius: 3, paddingVertical: 4, paddingHorizontal: 4, fontSize: 12, fontWeight: '600' as const, textAlign: 'center' as const, color: Ink.textDim },
+  plateResult: { fontSize: 12, color: Ink.textDim, letterSpacing: 0.3, fontVariant: ['tabular-nums' as const] },
   // RPE guide
   rpeGuideBtn: { marginLeft: 6, width: 18, alignItems: 'center' as const, justifyContent: 'center' as const },
-  rpeGuideBtnText: { fontSize: 11, color: '#2a2a40' },
+  rpeGuideBtnText: { fontSize: 11, color: Ink.textFaint },
   rpeGuide: { marginTop: 6, backgroundColor: '#0a0a18', borderRadius: 3, padding: 10 },
   rpeGuideRow: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingVertical: 3, gap: 8 },
-  rpeGuideNum: { width: 44, fontSize: 10, color: '#666', fontWeight: '700' as const, letterSpacing: 0.5 },
-  rpeGuideRir: { width: 40, fontSize: 10, color: '#888', fontVariant: ['tabular-nums' as const] },
-  rpeGuideDesc: { fontSize: 10, color: '#555', flex: 1 },
+  rpeGuideNum: { width: 44, fontSize: 10, color: Ink.textFaint, fontWeight: '700' as const, letterSpacing: 0.5 },
+  rpeGuideRir: { width: 40, fontSize: 10, color: Ink.textDim, fontVariant: ['tabular-nums' as const] },
+  rpeGuideDesc: { fontSize: 10, color: Ink.textFaint, flex: 1 },
 });
 
 const drag = StyleSheet.create({
-  handle: { backgroundColor: '#0e0e1c', borderTopLeftRadius: 4, borderTopRightRadius: 4, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1a1a2e', flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: -4 },
-  handleDots: { fontSize: 13, color: '#333', letterSpacing: 2 },
-  handleLabel: { fontSize: 9, color: '#333', letterSpacing: 2, textTransform: 'uppercase' },
+  handle: { backgroundColor: Ink.raised, borderTopLeftRadius: 4, borderTopRightRadius: 4, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: Ink.line, flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: -4 },
+  handleDots: { fontSize: 13, color: Ink.textFaint, },
+  handleLabel: { fontSize: 9, color: Ink.textFaint, },
   removeBtn: { position: 'absolute', right: 12, padding: 4 },
-  removeBtnText: { fontSize: 13, color: '#2a2a40' },
+  removeBtnText: { fontSize: 13, color: Ink.textFaint },
 });
 
 const diag = StyleSheet.create({
@@ -3174,7 +3168,7 @@ const diag = StyleSheet.create({
     borderColor: '#ddd',
     borderRadius: 10,
   },
-  toggleText: { fontSize: 11, color: '#888' },
+  toggleText: { fontSize: 11, color: Ink.textDim },
 });
 
 
@@ -3187,19 +3181,19 @@ const badgeOverlay = StyleSheet.create({
     zIndex: 999,
   },
   card: {
-    backgroundColor: '#0e0e1c',
+    backgroundColor: Ink.raised,
     borderWidth: 1,
-    borderColor: '#2a2a40',
+    borderColor: Ink.line,
     borderRadius: 16,
     padding: 32,
     alignItems: 'center',
     gap: 12,
     maxWidth: 300,
   },
-  label: { fontSize: 9, color: '#555', letterSpacing: 4, textTransform: 'uppercase' },
+  label: { fontSize: 9, color: Ink.textFaint, },
   icon:  { fontSize: 72, lineHeight: 90 },
-  name:  { fontSize: 20, fontWeight: '700', color: '#fff', letterSpacing: 1, textAlign: 'center' },
-  flavour: { fontSize: 13, color: '#777', textAlign: 'center', lineHeight: 20, fontStyle: 'italic' },
-  hint:  { fontSize: 10, color: '#333', letterSpacing: 2, textTransform: 'uppercase', marginTop: 8 },
+  name:  { fontSize: 20, fontWeight: '700', color: '#fff', textAlign: 'center' },
+  flavour: { fontSize: 13, color: Ink.textDim, textAlign: 'center', lineHeight: 20, fontStyle: 'italic' },
+  hint:  { fontSize: 10, color: Ink.textFaint, marginTop: 8 },
 });
 

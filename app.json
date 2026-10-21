@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "gymproto",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.r3xxy.gymproto",

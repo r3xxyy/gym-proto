@@ -51,3 +51,13 @@ export const Fonts = Platform.select({
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
+
+/** Surface and text tokens for the dark line-up UI. Text tones all clear 4.5:1 on `bg`. */
+export const Ink = {
+  bg: '#09090E',
+  raised: '#13131C',
+  line: '#2A2A3C',
+  text: '#F4F4F8',
+  textDim: '#A6A6BC',
+  textFaint: '#7E7E96',
+};
