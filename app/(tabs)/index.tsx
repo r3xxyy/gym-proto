@@ -32,6 +32,8 @@ import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoac
 import { formatTime, nowMs, parseHistoryDate, shortDate, shortGym } from '@/lib/format';
 import { FREE_WEIGHT_EXERCISES, getLastSessionColor, getMostRecentSession, getPrevSessionInfo } from '@/lib/history-lookup';
 import type { PrevRef } from '@/lib/history-lookup';
+import { deriveTargets } from '@/lib/progression';
+import { personalRecords } from '@/lib/progress';
 import { getRestDuration } from '@/lib/rest';
 import { RESTORED_SESSIONS } from '@/lib/seed-history';
 import { ACTIVE_SESSION_PATH, BADGES_PATH, BW_PATH, EPOCH_PATH, GYM_PATH, GYMS_PATH, HISTORY_PATH, PENDING_PATH, WEEK_PLAN_PATH } from '@/lib/storage';
@@ -114,32 +116,6 @@ function applyGymTags(history: HistoryEntry[]): { updated: HistoryEntry[]; chang
   return { updated, changed };
 }
 
-// ─── Derive targets from history when no coach plan exists for current week ───
-function deriveTargetsFromHistory(
-  base: Record<number, Omit<Exercise, 'sets'>[]>,
-  history: HistoryEntry[]
-): Record<number, Omit<Exercise, 'sets'>[]> {
-  const result: Record<number, Omit<Exercise, 'sets'>[]> = {};
-  for (const day of [1, 2, 3, 4, 5] as const) {
-    const workoutName = SPLIT[day];
-    const lastEntry = [...history]
-      .filter(h => h.workoutName === workoutName)
-      .sort((a, b) => parseHistoryDate(b.date) - parseHistoryDate(a.date))[0];
-    result[day] = (base[day] ?? []).map(ex => {
-      if (!lastEntry) return ex;
-      const lastEx = lastEntry.exercises.find(e => e.name === ex.name);
-      if (!lastEx) return ex;
-      const logged = lastEx.sets.filter(s => parseFloat(s.weight) > 0);
-      if (logged.length === 0) return ex;
-      const maxSet = logged.reduce((best, s) =>
-        (parseFloat(s.weight) || 0) > (parseFloat(best.weight) || 0) ? s : best
-      );
-      return { ...ex, target: `${maxSet.weight} kg × ${maxSet.reps} × ${logged.length}` };
-    });
-  }
-  return result;
-}
-
 export default function HomeScreen() {
   const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history'>('home');
   const prevScreenRef = useRef<'home' | 'active'>('home');
@@ -167,6 +143,8 @@ export default function HomeScreen() {
   const [activeSwapId, setActiveSwapId] = useState<string | null>(null); // '__add__' = add mode
   const [swapQuery, setSwapQuery] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  // Best estimated 1RM per exercise from past sessions, for the new-PR flash while logging.
+  const bestE1RMByName: Record<string, number> = Object.fromEntries(personalRecords(history).map(p => [p.name, p.e1rm]));
   const [activeGym, setActiveGym] = useState<string>('');
   const [savedGyms, setSavedGyms] = useState<string[]>([]);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
@@ -726,10 +704,10 @@ export default function HomeScreen() {
           const p = saved.plan;
           setWeekPlan({ 1: [...(p[1]??[])], 2: [...(p[2]??[])], 3: [...(p[3]??[])], 4: [...(p[4]??[])], 5: [...(p[5]??[])] });
         } else {
-          setWeekPlan(deriveTargetsFromHistory(getWeekExercises(effectWeek), finalHistory));
+          setWeekPlan(deriveTargets(getWeekExercises(effectWeek), finalHistory));
         }
       } else {
-        setWeekPlan(deriveTargetsFromHistory(getWeekExercises(effectWeek), finalHistory));
+        setWeekPlan(deriveTargets(getWeekExercises(effectWeek), finalHistory));
       }
       setWeekPlanLoaded(true);
       // Restore unsaved session if app was killed on the summary screen
@@ -1230,6 +1208,7 @@ export default function HomeScreen() {
                   startFreshRest(getRestDuration(ex));
                 }}
                 onRateSet={(ex) => retargetRest(getRestDuration(ex))}
+                bestE1RM={bestE1RMByName[ex.name]}
                 prevSets={pi?.sets}
                 prevLabel={pi ? mkLabel(pi) : undefined}
                 prevSets2={si?.sets}

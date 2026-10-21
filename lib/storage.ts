@@ -11,3 +11,4 @@ export const GYM_PATH           = FileSystem.documentDirectory + 'gym.json';
 export const GYMS_PATH          = FileSystem.documentDirectory + 'gyms.json';
 export const EPOCH_PATH         = FileSystem.documentDirectory + 'epoch.json';
 
+export const DELOAD_PATH        = FileSystem.documentDirectory + 'deloadDismissed.json';

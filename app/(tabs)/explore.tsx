@@ -12,7 +12,8 @@ import { countedSets, exerciseSeries, parseDateLocal, personalRecords } from '@/
 import type { PersonalRecord } from '@/lib/progress';
 import { sessionVolume } from '@/lib/session-stats';
 import { formatWeekForCoach } from '@/lib/coach-text';
-import { BADGES_PATH, EPOCH_PATH, HISTORY_PATH } from '@/lib/storage';
+import { deloadHint } from '@/lib/deload';
+import { BADGES_PATH, DELOAD_PATH, EPOCH_PATH, HISTORY_PATH } from '@/lib/storage';
 
 // ─── Muscle mapping ───────────────────────────────────────────────────────────
 
@@ -188,11 +189,14 @@ function TrendSheet({ record, history, onClose }: { record: PersonalRecord; hist
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoch }: {
+export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoch, deloadDismissedWeek, onDismissDeload }: {
   history: HistoryEntry[];
   unlockedBadges: UnlockedBadge[];
   programEpoch: number;
   onEditEpoch?: (epoch: number) => void;
+  /** Program week in which the lighter-week hint was dismissed. */
+  deloadDismissedWeek?: number;
+  onDismissDeload?: (week: number) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selectedBadge, setSelectedBadge] = useState<BadgeDefinition | null>(null);
@@ -239,6 +243,7 @@ export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoc
     return d >= weekStart && d < weekEnd;
   });
 
+  const hint = deloadDismissedWeek === currentWeek ? null : deloadHint(history, programEpoch, currentWeek);
   const prs = personalRecords(history);
   const shownPrs = showAllPrs ? prs : prs.slice(0, 8);
   const unlockedMap = new Map(unlockedBadges.map(b => [b.id, b.unlockedAt]));
@@ -258,6 +263,15 @@ export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoc
           <Text style={s.weekPillText}>Week {currentWeek}  ✎</Text>
         </TouchableOpacity>
       </View>
+
+      {hint && (
+        <View style={s.hintCard}>
+          <Text style={s.hintText}>{hint}</Text>
+          <TouchableOpacity onPress={() => onDismissDeload?.(currentWeek)} hitSlop={8}>
+            <Text style={s.hintDismiss}>Dismiss for this week</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ── Muscle Volume ── */}
       <SectionHeader title="Sets per week" collapsed={!!collapsed['muscle']} onToggle={() => toggle('muscle')} />
@@ -383,6 +397,7 @@ export default function StatsScreen() {
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [programEpoch, setProgramEpoch] = useState(PROGRAM_EPOCH);
+  const [deloadDismissedWeek, setDeloadDismissedWeek] = useState<number | undefined>(undefined);
 
   useFocusEffect(
     useCallback(() => {
@@ -404,6 +419,11 @@ export default function StatsScreen() {
           const raw = await FileSystem.readAsStringAsync(BADGES_PATH);
           setUnlockedBadges(JSON.parse(raw));
         }
+        const deloadInfo = await FileSystem.getInfoAsync(DELOAD_PATH);
+        if (deloadInfo.exists) {
+          const week = JSON.parse(await FileSystem.readAsStringAsync(DELOAD_PATH));
+          if (typeof week === 'number') setDeloadDismissedWeek(week);
+        }
         setLoaded(true);
       })();
     }, [])
@@ -416,6 +436,11 @@ export default function StatsScreen() {
       history={history}
       unlockedBadges={unlockedBadges}
       programEpoch={programEpoch}
+      deloadDismissedWeek={deloadDismissedWeek}
+      onDismissDeload={(week) => {
+        setDeloadDismissedWeek(week);
+        FileSystem.writeAsStringAsync(DELOAD_PATH, JSON.stringify(week)).catch(() => {});
+      }}
       onEditEpoch={(epoch) => {
         setProgramEpoch(epoch);
         FileSystem.writeAsStringAsync(EPOCH_PATH, JSON.stringify(epoch));
@@ -432,6 +457,9 @@ const s = StyleSheet.create({
   empty: { justifyContent: 'center', alignItems: 'center', padding: 40, gap: 8 },
   emptyTitle: { fontFamily: 'Unbounded_700Bold', fontSize: 20, color: Ink.text, textAlign: 'center' },
   emptyText: { fontSize: 15, color: Ink.textDim, textAlign: 'center' },
+  hintCard: { marginTop: 20, borderWidth: 1, borderColor: Ink.textFaint, borderRadius: 14, padding: 16, gap: 10 },
+  hintText: { fontSize: 15, lineHeight: 21, color: Ink.text },
+  hintDismiss: { fontSize: 14, color: Ink.textDim },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   screenTitle: { fontFamily: 'Unbounded_700Bold', fontSize: 30, color: Ink.text },
   weekPill: { borderWidth: 1, borderColor: Ink.line, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },

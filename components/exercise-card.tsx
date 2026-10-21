@@ -5,6 +5,7 @@ import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { Ink } from '@/constants/theme';
 import { nowMs } from '@/lib/format';
+import { estimate1RM } from '@/lib/progress';
 import type { Exercise } from '../types';
 
 // ─── Exercise Card ────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ function ExerciseCard({
   onRemove,
   onConfirmSet,
   onRateSet,
+  bestE1RM,
   prevSets,
   prevLabel,
   prevSets2,
@@ -53,11 +55,15 @@ function ExerciseCard({
   onConfirmSet?: (exercise: Exercise) => void;
   /** Called with the exercise up to and including a set that was just given an RPE. */
   onRateSet?: (exercise: Exercise) => void;
+  /** Best estimated 1RM logged for this exercise before today; undefined if it has never been logged. */
+  bestE1RM?: number;
   prevSets?: { weight: string; reps: string }[];
   prevLabel?: string;
   prevSets2?: { weight: string; reps: string }[];
   prevLabel2?: string;
 }) {
+  const [pr, setPr] = useState<{ si: number; e1rm: number } | null>(null);
+  const bestRef = useRef(bestE1RM);
   const [showMenu, setShowMenu] = useState(false);
   const [showPlates, setShowPlates] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -167,6 +173,7 @@ function ExerciseCard({
       // tick again to take it back
       onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false } : s) });
       setRateOpen(null);
+      if (pr?.si === si) setPr(null);
       return;
     }
     Keyboard.dismiss();
@@ -174,6 +181,15 @@ function ExerciseCard({
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, done: true } : s);
     onChange({ ...exercise, sets, endedAt: nowMs() });
     setRateOpen(si);
+    // A new best estimated 1RM, once this exercise has a history to beat.
+    const est = estimate1RM(parseFloat(sets[si].weight) || 0, parseInt(sets[si].reps) || 0);
+    if (bestRef.current !== undefined && est > bestRef.current) {
+      bestRef.current = est;
+      setPr({ si, e1rm: est });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } else if (pr) {
+      setPr(null);
+    }
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
 
@@ -365,6 +381,12 @@ function ExerciseCard({
                 </View>
               )}
 
+              {isDone && pr?.si === si && (
+                <View style={aCard.prStrip}>
+                  <Text style={aCard.prText}>New PR  ·  {pr.e1rm} kg est. 1RM</Text>
+                </View>
+              )}
+
               {isDone && rateOpen === si ? (
                 <View style={aCard.rateRow}>
                   <Text style={aCard.moreLabel}>Effort</Text>
@@ -438,6 +460,7 @@ export function DraggableCard({
   onReorder,
   onConfirmSet,
   onRateSet,
+  bestE1RM,
   prevSets,
   prevLabel,
   prevSets2,
@@ -452,6 +475,7 @@ export function DraggableCard({
   onReorder: (from: number, to: number) => void;
   onConfirmSet?: (exercise: Exercise) => void;
   onRateSet?: (exercise: Exercise) => void;
+  bestE1RM?: number;
   prevSets?: { weight: string; reps: string }[];
   prevLabel?: string;
   prevSets2?: { weight: string; reps: string }[];
@@ -491,7 +515,7 @@ export function DraggableCard({
         style={animStyle}
         onLayout={e => { cardHeight.value = e.nativeEvent.layout.height; }}
       >
-        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onRemove={onRemove} onConfirmSet={onConfirmSet} onRateSet={onRateSet} prevSets={prevSets} prevLabel={prevLabel} prevSets2={prevSets2} prevLabel2={prevLabel2} />
+        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onRemove={onRemove} onConfirmSet={onConfirmSet} onRateSet={onRateSet} bestE1RM={bestE1RM} prevSets={prevSets} prevLabel={prevLabel} prevSets2={prevSets2} prevLabel2={prevLabel2} />
       </Animated.View>
     </GestureDetector>
   );
@@ -541,6 +565,8 @@ const aCard = StyleSheet.create({
   moreLink: { fontSize: 13, color: Ink.textDim },
   dropLinks: { flexDirection: 'row', gap: 20, marginTop: 8, paddingLeft: 48 },
   dropArrow: { fontSize: 16, color: Ink.textFaint },
+  prStrip: { alignSelf: 'flex-start', marginTop: 10, marginLeft: 48, backgroundColor: Ink.text, borderRadius: 14, paddingVertical: 6, paddingHorizontal: 12 },
+  prText: { fontSize: 13, fontWeight: '800', color: Ink.bg },
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 48 },
   rateChip: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
   rateChipText: { fontSize: 14, fontWeight: '600', color: Ink.text },
