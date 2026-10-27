@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, View } from 'react-native';
+import { AccessibilityInfo, AppState, View } from 'react-native';
 import { GLView } from 'expo-gl';
+import { useIsFocused } from 'expo-router';
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
 
 type Mesh = { positions: number[]; normals: number[]; indices: number[] };
 type PathPoint = { p: [number, number]; n: [number, number] };
 
-const TUBE = 12;   // samples around a wire
+/** Geometry detail: samples around a wire, around a pin, and along each path. */
+type Tier = { tube: number; seg: number; path: number };
+const TIERS: Record<'high' | 'low', Tier> = {
+  high: { tube: 12, seg: 16, path: 1 },
+  low: { tube: 6, seg: 8, path: 0.5 },
+};
+// Average frame time over the first FRAMES frames above this drops to the low tier.
+const SLOW_FRAME_MS = 20;
+const FRAMES = 60;
 
 // Chain link: an oval torus lying in the XY plane.
 const R = 0.22;    // radius of the end arcs, to the wire centre
@@ -42,7 +51,7 @@ function stadiumPoint(s: number, r: number, l: number): PathPoint {
  * Sweeps a circle of the given radius along a path in the XY plane. A closed path wraps
  * round on itself; an open one gets a flat cap at each end.
  */
-function sweep(mesh: Mesh, path: PathPoint[], radius: number, closed: boolean) {
+function sweep(mesh: Mesh, path: PathPoint[], radius: number, closed: boolean, TUBE: number) {
   const base = mesh.positions.length / 3;
   const n = path.length;
   for (const { p, n: nm } of path) {
@@ -89,8 +98,7 @@ function sweep(mesh: Mesh, path: PathPoint[], radius: number, closed: boolean) {
  * A rivet or pin lying along z: a short barrel with domed heads, centred on (cx, cy).
  * Revolved from a profile of (radius, z, normal-radial, normal-z).
  */
-function addPin(mesh: Mesh, cx: number, cy: number, r: number, h: number) {
-  const SEG = 16;
+function addPin(mesh: Mesh, cx: number, cy: number, r: number, h: number, SEG: number) {
   const d = r * 0.35;
   const profile: [number, number, number, number][] = [
     [0, -h - d, 0, -1],
@@ -127,44 +135,45 @@ const finish = (m: Mesh) => ({
   indices: new Uint16Array(m.indices),
 });
 
-function buildLink() {
+function buildLink({ tube, path: detail }: Tier) {
   const mesh: Mesh = { positions: [], normals: [], indices: [] };
   const total = 2 * L + 2 * Math.PI * R;
   const path: PathPoint[] = [];
-  for (let i = 0; i < 48; i++) path.push(stadiumPoint((i / 48) * total, R, L));
-  sweep(mesh, path, WIRE, true);
+  const n = Math.round(48 * detail);
+  for (let i = 0; i < n; i++) path.push(stadiumPoint((i / n) * total, R, L));
+  sweep(mesh, path, WIRE, true, tube);
   return finish(mesh);
 }
 
-function buildCarabiner() {
+function buildCarabiner({ tube, seg, path: detail }: Tier) {
   const mesh: Mesh = { positions: [], normals: [], indices: [] };
 
   // Frame: the stadium outline without its right-hand side, which is the gate.
   const total = 2 * CL + 2 * Math.PI * CR;
   const frame: PathPoint[] = [];
-  const steps = 56;
+  const steps = Math.round(56 * detail);
   for (let i = 0; i <= steps; i++) frame.push(stadiumPoint(CL + (i / steps) * (total - CL), CR, CL));
-  sweep(mesh, frame, CWIRE, false);
+  sweep(mesh, frame, CWIRE, false, tube);
 
   // Gate: a thinner straight bar closing the right-hand side.
   const bar = (y0: number, y1: number): PathPoint[] =>
     Array.from({ length: 6 }, (_, i) => ({ p: [CR, y0 + ((y1 - y0) * i) / 5] as [number, number], n: [1, 0] as [number, number] }));
-  sweep(mesh, bar(-CL / 2, CL / 2), GATE_WIRE, false);
+  sweep(mesh, bar(-CL / 2, CL / 2), GATE_WIRE, false, tube);
 
   // Screw sleeve: a knurled collar near the hinge end of the gate, ridges alternating in radius.
   const ridges = 7;
   for (let k = 0; k < ridges; k++) {
     const y0 = -CL / 2 + 0.04 + k * 0.045;
-    sweep(mesh, bar(y0, y0 + 0.045), k % 2 === 0 ? SLEEVE_WIRE : SLEEVE_WIRE + 0.02, false);
+    sweep(mesh, bar(y0, y0 + 0.045), k % 2 === 0 ? SLEEVE_WIRE : SLEEVE_WIRE + 0.02, false, tube);
   }
   // Thin washer where the sleeve meets the gate.
-  sweep(mesh, bar(-CL / 2 + 0.04 + ridges * 0.045, -CL / 2 + 0.07 + ridges * 0.045), SLEEVE_WIRE - 0.035, false);
+  sweep(mesh, bar(-CL / 2 + 0.04 + ridges * 0.045, -CL / 2 + 0.07 + ridges * 0.045), SLEEVE_WIRE - 0.035, false, tube);
 
   // Hardware: hinge pin, nose pin and a rivet plate on the spine, heads proud of both faces.
-  addPin(mesh, CR, -CL / 2 - 0.015, 0.075, CWIRE + 0.012);
-  addPin(mesh, CR, CL / 2 + 0.015, 0.065, CWIRE + 0.01);
-  addPin(mesh, -CR, 0, 0.12, CWIRE + 0.012);
-  addPin(mesh, -CR, 0, 0.05, CWIRE + 0.03);
+  addPin(mesh, CR, -CL / 2 - 0.015, 0.075, CWIRE + 0.012, seg);
+  addPin(mesh, CR, CL / 2 + 0.015, 0.065, CWIRE + 0.01, seg);
+  addPin(mesh, -CR, 0, 0.12, CWIRE + 0.012, seg);
+  addPin(mesh, -CR, 0, 0.05, CWIRE + 0.03, seg);
   return finish(mesh);
 }
 
@@ -311,7 +320,17 @@ export function ChromeChains({ paused = false }: Props) {
   const glRef = useRef<any>(null);
   const drawRef = useRef<((t: number) => void) | null>(null);
   const rafRef = useRef(0);
+  const rebuildRef = useRef<((tier: Tier) => void) | null>(null);
+  const tierRef = useRef<'high' | 'low'>('high');
   const [reduceMotion, setReduceMotion] = useState(false);
+  // Off-screen (other tab) or backgrounded: nothing is visible, so don't burn GPU on it.
+  const focused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
@@ -320,8 +339,23 @@ export function ChromeChains({ paused = false }: Props) {
   }, []);
 
   const loop = useCallback(() => {
+    // Performance tiering: if the first frames run slow, rebuild the meshes with fewer segments.
+    let last = 0, frames = 0, total = 0;
+    let measuring = tierRef.current === 'high';
     function tick() {
-      drawRef.current?.(Date.now() / 1000);
+      const now = Date.now();
+      if (measuring && last) {
+        total += now - last;
+        if (++frames >= FRAMES) {
+          measuring = false;
+          if (total / frames > SLOW_FRAME_MS) {
+            tierRef.current = 'low';
+            rebuildRef.current?.(TIERS.low);
+          }
+        }
+      }
+      last = now;
+      drawRef.current?.(now / 1000);
       glRef.current?.endFrameEXP?.();
       rafRef.current = requestAnimationFrame(tick);
     }
@@ -330,14 +364,14 @@ export function ChromeChains({ paused = false }: Props) {
 
   const start = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
-    if (!drawRef.current) return;
+    if (!drawRef.current || !focused || !appActive) return;
     if (paused || reduceMotion) {
       drawRef.current(3);
       glRef.current?.endFrameEXP?.();
       return;
     }
     loop();
-  }, [paused, reduceMotion, loop]);
+  }, [paused, reduceMotion, focused, appActive, loop]);
 
   useEffect(() => {
     start();
@@ -379,8 +413,13 @@ export function ChromeChains({ paused = false }: Props) {
         count: g.indices.length,
       };
     };
-    const linkGeo = upload(buildLink());
-    const carabinerGeo = upload(buildCarabiner());
+    let linkGeo = upload(buildLink(TIERS.high));
+    let carabinerGeo = upload(buildCarabiner(TIERS.high));
+    rebuildRef.current = (tier) => {
+      for (const g of [linkGeo, carabinerGeo]) { gl.deleteBuffer(g.pos); gl.deleteBuffer(g.nor); gl.deleteBuffer(g.idx); }
+      linkGeo = upload(buildLink(tier));
+      carabinerGeo = upload(buildCarabiner(tier));
+    };
     const bindGeometry = (g: typeof linkGeo) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, g.pos);
       gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);

@@ -1,5 +1,6 @@
 import { Ink } from '@/constants/theme';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView, type BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useFocusEffect } from 'expo-router';
 import { Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -8,7 +9,8 @@ import { ALL_BADGES } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
 import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds } from '../../constants/programs';
 import { TrendChart } from '@/components/trend-chart';
-import { countedSets, exerciseSeries, parseDateLocal, personalRecords } from '@/lib/progress';
+import { parseDateLocal } from '@/lib/format';
+import { countedSets, exerciseSeries, personalRecords } from '@/lib/progress';
 import type { PersonalRecord } from '@/lib/progress';
 import { sessionVolume } from '@/lib/session-stats';
 import { formatWeekForCoach } from '@/lib/coach-text';
@@ -117,7 +119,7 @@ function computeStats(history: HistoryEntry[], epoch = PROGRAM_EPOCH) {
     const end = start + weekMs;
     const inWeek = history.filter(entry => {
       const d = parseDateLocal(entry.date);
-      return !isNaN(d) && d >= start && d < end && !entry.isRestDay && entry.workoutName !== 'Rest Day';
+      return d > 0 && d >= start && d < end && !entry.isRestDay && entry.workoutName !== 'Rest Day';
     });
     return { sessions: inWeek.length, volume: inWeek.reduce((t, e) => t + sessionVolume(e.exercises), 0) };
   });
@@ -161,29 +163,38 @@ function BadgeModal({ badge, unlockedAt, onClose }: { badge: BadgeDefinition; un
 
 function TrendSheet({ record, history, onClose }: { record: PersonalRecord; history: HistoryEntry[]; onClose: () => void }) {
   const [metric, setMetric] = useState<'e1rm' | 'volume'>('e1rm');
+  const ref = useRef<BottomSheetModal>(null);
+  useEffect(() => { ref.current?.present(); }, []);
+  const backdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} pressBehavior="close" />
+  ), []);
   const series = exerciseSeries(history, record.name).slice(-12);
   const points = series.map(p => ({ label: shortDay(p.date), value: metric === 'e1rm' ? p.e1rm : p.volume }));
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={ts.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={ts.sheet} onPress={() => {}}>
-          <Text style={ts.title}>{record.name}</Text>
-          <Text style={ts.sub}>Best set {record.weight} × {record.reps}  ·  {shortDay(record.date)}</Text>
-          <View style={ts.chips}>
-            {([['e1rm', 'Est. 1RM'], ['volume', 'Volume']] as const).map(([key, label]) => (
-              <TouchableOpacity key={key} style={[ts.chip, metric === key && ts.chipOn]} onPress={() => setMetric(key)}>
-                <Text style={[ts.chipText, metric === key && ts.chipTextOn]}>{label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TrendChart points={points} unit="kg" />
-          {series.length < 2 && <Text style={ts.hint}>Log this exercise twice to see a trend.</Text>}
-          <TouchableOpacity style={ts.close} onPress={onClose}>
-            <Text style={ts.closeText}>Close</Text>
-          </TouchableOpacity>
+    <BottomSheetModal
+      ref={ref}
+      enableDynamicSizing
+      backdropComponent={backdrop}
+      backgroundStyle={{ backgroundColor: Ink.raised }}
+      handleIndicatorStyle={{ backgroundColor: Ink.line }}
+      onDismiss={onClose}>
+      <BottomSheetView style={ts.sheet}>
+        <Text style={ts.title}>{record.name}</Text>
+        <Text style={ts.sub}>Best set {record.weight} × {record.reps}  ·  {shortDay(record.date)}</Text>
+        <View style={ts.chips}>
+          {([['e1rm', 'Est. 1RM'], ['volume', 'Volume']] as const).map(([key, label]) => (
+            <TouchableOpacity key={key} style={[ts.chip, metric === key && ts.chipOn]} onPress={() => setMetric(key)}>
+              <Text style={[ts.chipText, metric === key && ts.chipTextOn]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TrendChart points={points} unit="kg" />
+        {series.length < 2 && <Text style={ts.hint}>Log this exercise twice to see a trend.</Text>}
+        <TouchableOpacity style={ts.close} onPress={() => ref.current?.dismiss()}>
+          <Text style={ts.closeText}>Close</Text>
         </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+      </BottomSheetView>
+    </BottomSheetModal>
   );
 }
 
@@ -443,7 +454,7 @@ export default function StatsScreen() {
       }}
       onEditEpoch={(epoch) => {
         setProgramEpoch(epoch);
-        FileSystem.writeAsStringAsync(EPOCH_PATH, JSON.stringify(epoch));
+        FileSystem.writeAsStringAsync(EPOCH_PATH, JSON.stringify(epoch)).catch(() => {});
       }}
     />
   );
@@ -527,8 +538,7 @@ const bm = StyleSheet.create({
 // ─── Trend sheet styles ───────────────────────────────────────────────────────
 
 const ts = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: Ink.raised, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 36, borderTopWidth: 1, borderColor: Ink.line },
+  sheet: { padding: 24, paddingTop: 8, paddingBottom: 36 },
   title: { fontFamily: 'Unbounded_700Bold', fontSize: 18, color: Ink.text },
   sub: { fontSize: 14, color: Ink.textDim, marginTop: 4, marginBottom: 16 },
   chips: { flexDirection: 'row', gap: 8, marginBottom: 18 },
