@@ -17,24 +17,27 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedRef, useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Sortable from 'react-native-sortables';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ActRow } from '@/components/act-row';
 import { AnimatedPosterName } from '@/components/animated-poster-name';
 import { BadgeUnlockOverlay } from '@/components/badge-unlock-overlay';
-import { DraggableCard, NUMPAD_DONE_ID, NUMPAD_ID, runNumpadNext } from '@/components/exercise-card';
+import { ExerciseCard, NUMPAD_DONE_ID, NUMPAD_ID, NumpadChips, runNumpadNext } from '@/components/exercise-card';
 import { HistoryScreen } from '@/components/history-screen';
 import { SummaryScreen } from '@/components/summary-screen';
 
 import { ChromeChains } from '@/components/chrome-chains';
+import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
-import { formatTime, nowMs, parseHistoryDate, shortDate, shortGym } from '@/lib/format';
+import { setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
+import { formatTime, nowMs, parseDateLocal, shortDate, shortGym } from '@/lib/format';
 import { FREE_WEIGHT_EXERCISES, getLastSessionColor, getMostRecentSession, getPrevSessionInfo } from '@/lib/history-lookup';
 import type { PrevRef } from '@/lib/history-lookup';
 import { deriveTargets } from '@/lib/progression';
 import { personalRecords } from '@/lib/progress';
-import { getRestDuration } from '@/lib/rest';
+import { getRestDuration, isHeavySet } from '@/lib/rest';
 import { RESTORED_SESSIONS } from '@/lib/seed-history';
 import { ACTIVE_SESSION_PATH, BADGES_PATH, BW_PATH, EPOCH_PATH, GYM_PATH, GYMS_PATH, HISTORY_PATH, PENDING_PATH, WEEK_PLAN_PATH } from '@/lib/storage';
 import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
@@ -103,7 +106,7 @@ function applyGymTags(history: HistoryEntry[]): { updated: HistoryEntry[]; chang
   let changed = false;
   const updated = history.map(entry => {
     if (entry.gym) return entry; // already tagged
-    const ts = parseHistoryDate(entry.date);
+    const ts = parseDateLocal(entry.date);
     if (ts <= 0) return entry;
     let gym: string | undefined;
     if (STRATFORD_TS.has(ts))    gym = 'AF Stratford';
@@ -116,19 +119,38 @@ function applyGymTags(history: HistoryEntry[]): { updated: HistoryEntry[]; chang
   return { updated, changed };
 }
 
+// Tick-driven readouts: each subscribes to its own slice of the timer store so HomeScreen doesn't re-render every second.
+function SessionClock() {
+  const secs = useTimerStore(st => st.totalSessionSecs);
+  return <Text style={styles.timerBarTime}>{formatTime(secs)}</Text>;
+}
+function ActiveClock() {
+  const secs = useTimerStore(st => st.seconds);
+  return <Text style={styles.activeText}>Active {formatTime(secs)}</Text>;
+}
+function RestReadout({ duration, isOvertime }: { duration: number; isOvertime: boolean }) {
+  const rest = useTimerStore(st => st.currentRestSecs);
+  return (
+    <Text style={[styles.restBig, isOvertime && { color: '#FF9500' }]}>
+      {duration > 0
+        ? isOvertime ? `+${formatTime(rest - duration)}` : formatTime(duration - rest)
+        : formatTime(rest)}
+    </Text>
+  );
+}
+
 export default function HomeScreen() {
   const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history'>('home');
   const prevScreenRef = useRef<'home' | 'active'>('home');
-  const [seconds, setSeconds] = useState(0);
-  const [totalSessionSecs, setTotalSessionSecs] = useState(0); // cumulative from start, never pauses
   const [paused, setPaused] = useState(false);
-  const [, setRestSeconds] = useState(0);       // total rest (for history)
-  const [currentRestSecs, setCurrentRestSecs] = useState(0); // per-set rest display
   const [finalSeconds, setFinalSeconds] = useState(0);
   const [finalRest, setFinalRest] = useState(0);
   const [currentRestDuration, setCurrentRestDuration] = useState(0); // 0 = manual rest (no auto-resume)
+  const [restHeavy, setRestHeavy] = useState(false); // last set was a near-max compound: rest was extended
   const [bodyweight, setBodyweight] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const [programEpoch, setProgramEpoch] = useState(PROGRAM_EPOCH);
   const currentWeek = getCurrentProgramWeek(programEpoch);
   const [weekPlan, setWeekPlan] = useState<Record<number, Omit<Exercise, 'sets'>[]>>(() => {
@@ -141,7 +163,6 @@ export default function HomeScreen() {
   });
   const [swapContext, setSwapContext] = useState<{ day: number; exerciseId: string | null } | null>(null);
   const [activeSwapId, setActiveSwapId] = useState<string | null>(null); // '__add__' = add mode
-  const [swapQuery, setSwapQuery] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   // Best estimated 1RM per exercise from past sessions, for the new-PR flash while logging.
   const bestE1RMByName: Record<string, number> = Object.fromEntries(personalRecords(history).map(p => [p.name, p.e1rm]));
@@ -154,7 +175,7 @@ export default function HomeScreen() {
   const [weekPlanLoaded, setWeekPlanLoaded] = useState(false);
   const { start: cwStart, end: cwEnd } = getCurrentWeekBounds(programEpoch);
   const thisWeekHistory = history.filter(h => {
-    const ts = parseHistoryDate(h.date);
+    const ts = parseDateLocal(h.date);
     return ts >= cwStart && ts < cwEnd;
   });
   const completedDays = [...new Set(thisWeekHistory.map(h => WORKOUT_TO_DAY[h.workoutName]).filter(Boolean))];
@@ -181,7 +202,7 @@ export default function HomeScreen() {
   }
   function selectGym(gym: string) {
     setActiveGym(gym);
-    FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(gym));
+    FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(gym)).catch(() => {});
     if (!savedGyms.includes(gym)) saveGymList([...savedGyms, gym]);
   }
 
@@ -190,13 +211,13 @@ export default function HomeScreen() {
     if (!trimmed || trimmed === oldName) return;
     setHistory(prev => {
       const next = prev.map(e => e.gym === oldName ? { ...e, gym: trimmed } : e);
-      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(next));
+      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(next)).catch(() => {});
       return next;
     });
     saveGymList([...new Set(savedGyms.map(g => g === oldName ? trimmed : g).concat(trimmed))]);
     if (activeGym === oldName) {
       setActiveGym(trimmed);
-      FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(trimmed));
+      FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(trimmed)).catch(() => {});
     }
   }
 
@@ -205,7 +226,8 @@ export default function HomeScreen() {
   const continueAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: continuePulse.value }],
   }));
-  const isOvertime = paused && currentRestDuration > 0 && currentRestSecs >= currentRestDuration;
+  // Boolean selector: HomeScreen re-renders only when rest flips into overtime, not on every tick.
+  const isOvertime = useTimerStore(st => paused && currentRestDuration > 0 && st.currentRestSecs >= currentRestDuration);
   useEffect(() => {
     if (!weekPlanLoaded) return;
     FileSystem.writeAsStringAsync(WEEK_PLAN_PATH, JSON.stringify({ week: currentWeek, plan: weekPlan })).catch(() => {});
@@ -235,7 +257,7 @@ export default function HomeScreen() {
     };
     const updated = [entry, ...history];
     setHistory(updated);
-    FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
+    FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated)).catch(() => {});
   }
 
   function undoRestDay(day: number) {
@@ -244,7 +266,7 @@ export default function HomeScreen() {
     );
     const updated = history.filter(h => !ids.has(h.id));
     setHistory(updated);
-    FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
+    FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated)).catch(() => {});
   }
 
   function startWorkout() {
@@ -252,7 +274,6 @@ export default function HomeScreen() {
     const plan = weekPlan[selectedDay] ?? [];
     setSeconds(0);
     setTotalSessionSecs(0);
-    setRestSeconds(0);
     setPaused(false);
     activeAccRef.current = 0;
     activeStartRef.current = Date.now();
@@ -303,7 +324,6 @@ export default function HomeScreen() {
       restInterval.current = setInterval(() => {
         const cur = Math.round((Date.now() - restStartRef.current) / 1000);
         setCurrentRestSecs(cur);
-        setRestSeconds(restAccRef.current + cur);
       }, 1000);
       setPaused(true);
     } else {
@@ -353,7 +373,6 @@ export default function HomeScreen() {
     restInterval.current = setInterval(() => {
       const cur = Math.round((Date.now() - restStartRef.current) / 1000);
       setCurrentRestSecs(cur);
-      setRestSeconds(restAccRef.current + cur);
     }, 1000);
 
     // Haptic buzz 5s before end
@@ -399,13 +418,33 @@ export default function HomeScreen() {
     retargetRest(currentRestDuration + extraSecs);
   }
 
-  function reorderExercise(from: number, to: number) {
-    setExercises(prev => {
-      const arr = [...prev];
-      const [moved] = arr.splice(from, 1);
-      arr.splice(to, 0, moved);
-      return arr;
-    });
+  function renderExercise({ item: ex }: { item: Exercise }) {
+    const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, todayWorkout, history, activeGym);
+    const mkLabel = (r: PrevRef) => r.crossGym && r.gym ? `↗ ${shortGym(r.gym)} · ${shortDate(r.date)}` : shortDate(r.date);
+    return (
+      <ExerciseCard
+        exercise={ex}
+        dragActive={dragging}
+        onChange={updated =>
+          setExercises(prev => prev.map(e => (e.id === updated.id ? updated : e)))
+        }
+        onSwap={() => setActiveSwapId(ex.id)}
+        onRemove={() => setExercises(prev => prev.filter(e => e.id !== ex.id))}
+        onConfirmSet={(ex) => {
+          setRestHeavy(false);
+          startFreshRest(getRestDuration(ex));
+        }}
+        onRateSet={(ex) => {
+          setRestHeavy(isHeavySet(ex));
+          retargetRest(getRestDuration(ex));
+        }}
+        bestE1RM={bestE1RMByName[ex.name]}
+        prevSets={pi?.sets}
+        prevLabel={pi ? mkLabel(pi) : undefined}
+        prevSets2={si?.sets}
+        prevLabel2={si ? mkLabel(si) : undefined}
+      />
+    );
   }
 
   function endWorkout() {
@@ -436,15 +475,15 @@ export default function HomeScreen() {
       gym: activeGym || undefined,
     };
     setPendingEntry(entry);
-    FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(entry));
-    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true });
+    FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(entry)).catch(() => {});
+    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
     setFinalSeconds(finalActive);
     setFinalRest(finalRest_);
     setScreen('summary');
   }
 
   function continueWorkout() {
-    FileSystem.deleteAsync(PENDING_PATH, { idempotent: true });
+    FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
     // Restore accumulators from frozen values so timer picks up seamlessly
     activeAccRef.current = finalSeconds;
     activeStartRef.current = Date.now();
@@ -479,7 +518,6 @@ export default function HomeScreen() {
           restAccRef.current = 0;
           setSeconds(0);
           setTotalSessionSecs(0);
-          setRestSeconds(0);
           setCurrentRestSecs(0);
           setCurrentRestDuration(0);
           setPaused(false);
@@ -495,10 +533,9 @@ export default function HomeScreen() {
   }
 
   function navigateHome() {
-    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true });
+    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
     setSeconds(0);
     setTotalSessionSecs(0);
-    setRestSeconds(0);
     setCurrentRestSecs(0);
     setCurrentRestDuration(0);
     setPaused(false);
@@ -513,13 +550,13 @@ export default function HomeScreen() {
   }
 
   function reset() {
-    FileSystem.deleteAsync(PENDING_PATH, { idempotent: true });
-    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true });
+    FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
+    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
     let updatedHistory = history;
     if (pendingEntry) {
       updatedHistory = [pendingEntry, ...history];
       setHistory(updatedHistory);
-      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updatedHistory));
+      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updatedHistory)).catch(() => {});
       setPendingEntry(null);
     }
     const newly = checkNewBadges(updatedHistory, unlockedBadges);
@@ -527,7 +564,7 @@ export default function HomeScreen() {
       const now = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
       const updated = [...unlockedBadges, ...newly.map(b => ({ id: b.id, unlockedAt: now }))];
       setUnlockedBadges(updated);
-      FileSystem.writeAsStringAsync(BADGES_PATH, JSON.stringify(updated));
+      FileSystem.writeAsStringAsync(BADGES_PATH, JSON.stringify(updated)).catch(() => {});
       setNewBadgeQueue(newly); // overlay handles navigation
     } else {
       navigateHome();
@@ -545,16 +582,22 @@ export default function HomeScreen() {
     };
   }, []);
 
+  // Latest values for the AppState listener, so it subscribes once instead of on every rest tick.
+  const appStateLive = useRef({ screen, paused, currentRestDuration, resumeFromRest });
+  useEffect(() => {
+    appStateLive.current = { screen, paused, currentRestDuration, resumeFromRest };
+  });
+
   // ── AppState: sync rest timer if iOS suspended JS while backgrounded ──
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextAppState) => {
       isAppActiveRef.current = (nextAppState === 'active');
       if (nextAppState !== 'active') return;
+      const { screen, paused, currentRestDuration, resumeFromRest } = appStateLive.current;
       if (screen === 'active' && paused && currentRestDuration > 0) {
         // Sync elapsed time — restInterval may have been paused by iOS
         const elapsed = Math.round((Date.now() - restStartRef.current) / 1000);
         setCurrentRestSecs(elapsed);
-        setRestSeconds(restAccRef.current + elapsed);
         // If rest expired while backgrounded, auto-resume now
         if (elapsed >= currentRestDuration) {
           if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
@@ -565,26 +608,30 @@ export default function HomeScreen() {
           if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           const remaining = currentRestDuration - elapsed;
           autoResumeTimer.current = setTimeout(() => {
-            if (isAppActiveRef.current) resumeFromRest();
+            if (isAppActiveRef.current) appStateLive.current.resumeFromRest();
           }, remaining * 1000);
         }
       }
     });
     return () => sub.remove();
-  }, [screen, paused, currentRestDuration]);
+  }, []);
 
   // ── Active session persistence: survive Expo Go reloads mid-session ──
   useEffect(() => {
     if (screen !== 'active') return;
-    FileSystem.writeAsStringAsync(ACTIVE_SESSION_PATH, JSON.stringify({
-      exercises,
-      sessionStartEpoch: sessionStartRef.current,
-      activeAcc: paused ? activeAccRef.current : activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000),
-      restAcc: restAccRef.current,
-      bodyweight,
-      paused,
-      selectedDay,
-    })).catch(() => {});
+    // Debounced so typing doesn't write to disk on every keystroke; the cleanup also cancels a pending write when the session ends.
+    const timer = setTimeout(() => {
+      FileSystem.writeAsStringAsync(ACTIVE_SESSION_PATH, JSON.stringify({
+        exercises,
+        sessionStartEpoch: sessionStartRef.current,
+        activeAcc: paused ? activeAccRef.current : activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000),
+        restAcc: restAccRef.current,
+        bodyweight,
+        paused,
+        selectedDay,
+      })).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
   }, [exercises, screen]);
 
   useEffect(() => {
@@ -736,7 +783,6 @@ export default function HomeScreen() {
           if (saved.selectedDay != null) setSelectedDay(saved.selectedDay);
           setSeconds(saved.activeAcc);
           setTotalSessionSecs(Math.round((Date.now() - saved.sessionStartEpoch) / 1000));
-          setRestSeconds(saved.restAcc);
           setPaused(false);
           workoutInterval.current = setInterval(() => {
             setSeconds(activeAccRef.current + Math.round((Date.now() - activeStartRef.current) / 1000));
@@ -760,6 +806,7 @@ export default function HomeScreen() {
               <TouchableOpacity onPress={runNumpadNext} hitSlop={8}>
                 <Text style={styles.numpadBtn}>Next</Text>
               </TouchableOpacity>
+              <NumpadChips />
               <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={8}>
                 <Text style={[styles.numpadBtn, { fontWeight: '800' }]}>Done</Text>
               </TouchableOpacity>
@@ -1029,71 +1076,34 @@ export default function HomeScreen() {
             })()}
           </ScrollView>
 
-          {/* ── Swap Modal ── */}
-          {swapContext !== null && (
-            <TouchableOpacity style={swap.overlay} activeOpacity={1} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
-              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-              <TouchableOpacity activeOpacity={1} onPress={() => {}}>
-                <View style={poster.swapSheet}>
-                  <Text style={poster.swapTitle}>{swapContext.exerciseId === null ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
-                  <TextInput
-                    style={poster.swapSearch}
-                    value={swapQuery}
-                    onChangeText={setSwapQuery}
-                    placeholder="Search or type custom name…"
-                    placeholderTextColor="#444"
-                    autoCorrect={false}
-                  />
-                  <ScrollView style={{ maxHeight: 280 }}>
-                    {swapQuery.trim() !== '' && !getSwapOptions(swapContext.exerciseId ?? '', weekPlan[swapContext.day] ?? []).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
-                      <TouchableOpacity
-                        style={poster.swapOption}
-                        onPress={() => {
-                          const customEx: Omit<Exercise, 'sets'> = { id: `custom_${Date.now()}`, name: swapQuery.trim(), muscles: '', type: 'Iso', target: '', cue: '' };
-                          setWeekPlan(prev => ({
-                            ...prev,
-                            [swapContext.day]: swapContext.exerciseId === null
-                              ? [...(prev[swapContext.day] ?? []), customEx]
-                              : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? customEx : e),
-                          }));
-                          setSwapContext(null);
-                          setSwapQuery('');
-                        }}
-                      >
-                        <Text style={poster.swapOptName}>&quot;{swapQuery.trim()}&quot;</Text>
-                        <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
-                      </TouchableOpacity>
-                    )}
-                    {getSwapOptions(swapContext.exerciseId ?? '', weekPlan[swapContext.day] ?? [])
-                      .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
-                      .map(opt => (
-                        <TouchableOpacity
-                          key={opt.id}
-                          style={poster.swapOption}
-                          onPress={() => {
-                            setWeekPlan(prev => ({
-                              ...prev,
-                              [swapContext.day]: swapContext.exerciseId === null
-                                ? [...(prev[swapContext.day] ?? []), opt]
-                                : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? opt : e),
-                            }));
-                            setSwapContext(null);
-                            setSwapQuery('');
-                          }}
-                        >
-                          <Text style={poster.swapOptName}>{opt.name}</Text>
-                          <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
-                        </TouchableOpacity>
-                      ))}
-                  </ScrollView>
-                  <TouchableOpacity style={poster.swapClose} onPress={() => { setSwapContext(null); setSwapQuery(''); }}>
-                    <Text style={poster.swapCloseText}>CLOSE</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-              </KeyboardAvoidingView>
-            </TouchableOpacity>
-          )}
+          {/* ── Swap sheet ── */}
+          <SwapSheet
+            open={swapContext !== null}
+            title={swapContext?.exerciseId === null ? 'ADD EXERCISE' : 'SWAP EXERCISE'}
+            options={swapContext ? getSwapOptions(swapContext.exerciseId ?? '', weekPlan[swapContext.day] ?? []) : []}
+            onPick={opt => {
+              if (!swapContext) return;
+              setWeekPlan(prev => ({
+                ...prev,
+                [swapContext.day]: swapContext.exerciseId === null
+                  ? [...(prev[swapContext.day] ?? []), opt]
+                  : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? opt : e),
+              }));
+              setSwapContext(null);
+            }}
+            onCustom={name => {
+              if (!swapContext) return;
+              const customEx: Omit<Exercise, 'sets'> = { id: `custom_${Date.now()}`, name, muscles: '', type: 'Iso', target: '', cue: '' };
+              setWeekPlan(prev => ({
+                ...prev,
+                [swapContext.day]: swapContext.exerciseId === null
+                  ? [...(prev[swapContext.day] ?? []), customEx]
+                  : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? customEx : e),
+              }));
+              setSwapContext(null);
+            }}
+            onClose={() => setSwapContext(null)}
+          />
 
           {/* ── Footer — START WORKOUT only ── */}
           {selectedDay !== null && !completedDays.includes(selectedDay) && (
@@ -1113,7 +1123,7 @@ export default function HomeScreen() {
             <View style={styles.timerTop}>
               <TouchableOpacity onLongPress={resetClock} delayLongPress={600} activeOpacity={1} style={{ flex: 1 }}>
                 <Text style={styles.timerBarTitle} numberOfLines={1}>{SPLIT_LABEL[WORKOUT_TO_DAY[todayWorkout]] ?? todayWorkout}</Text>
-                <Text style={styles.timerBarTime}>{formatTime(totalSessionSecs)}</Text>
+                <SessionClock />
               </TouchableOpacity>
               <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'active'; setScreen('history'); }}>
                 <Text style={poster.histBtnText}>History</Text>
@@ -1121,16 +1131,13 @@ export default function HomeScreen() {
             </View>
             {paused ? (
               <View style={styles.restPanel}>
-                <Text style={[styles.restBig, isOvertime && { color: '#FF9500' }]}>
-                  {currentRestDuration > 0
-                    ? isOvertime
-                      ? `+${formatTime(currentRestSecs - currentRestDuration)}`
-                      : formatTime(currentRestDuration - currentRestSecs)
-                    : formatTime(currentRestSecs)}
-                </Text>
+                <RestReadout duration={currentRestDuration} isOvertime={isOvertime} />
                 <Text style={styles.restCaption}>
                   {currentRestDuration > 0 ? (isOvertime ? 'over your rest' : 'rest left') : 'resting'}
                 </Text>
+                {restHeavy && currentRestDuration > 0 && !isOvertime && (
+                  <Text style={styles.restCaption}>Heavy set detected — extra rest queued</Text>
+                )}
                 <View style={styles.restActions}>
                   {currentRestDuration > 0 && (
                     <>
@@ -1151,7 +1158,7 @@ export default function HomeScreen() {
               </View>
             ) : (
               <View style={styles.activeRow}>
-                <Text style={styles.activeText}>Active {formatTime(seconds)}</Text>
+                <ActiveClock />
                 <TouchableOpacity style={styles.restBtn} onPress={toggleRest}>
                   <Text style={styles.restBtnText}>Rest</Text>
                 </TouchableOpacity>
@@ -1188,113 +1195,56 @@ export default function HomeScreen() {
           </View>
 
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            {exercises.map((ex, idx) => {
-              const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, todayWorkout, history, activeGym);
-              const mkLabel = (r: PrevRef) => r.crossGym && r.gym ? `↗ ${shortGym(r.gym)} · ${shortDate(r.date)}` : shortDate(r.date);
-              return (
-              <DraggableCard
-                key={ex.id}
-                exercise={ex}
-                index={idx}
-                total={exercises.length}
-                onChange={updated =>
-                  setExercises(prev => prev.map(e => (e.id === updated.id ? updated : e)))
-                }
-                onSwap={() => setActiveSwapId(ex.id)}
-                onRemove={() => setExercises(prev => prev.filter(e => e.id !== ex.id))}
-                onReorder={reorderExercise}
-                onConfirmSet={(ex) => {
-                  startFreshRest(getRestDuration(ex));
-                }}
-                onRateSet={(ex) => retargetRest(getRestDuration(ex))}
-                bestE1RM={bestE1RMByName[ex.name]}
-                prevSets={pi?.sets}
-                prevLabel={pi ? mkLabel(pi) : undefined}
-                prevSets2={si?.sets}
-                prevLabel2={si ? mkLabel(si) : undefined}
-              />
-              );
-            })}
+          <Animated.ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            <Sortable.Grid
+              columns={1}
+              data={exercises}
+              keyExtractor={ex => ex.id}
+              renderItem={renderExercise}
+              scrollableRef={scrollRef}
+              dragActivationDelay={350}
+              activeItemScale={1.03}
+              dropAnimationDuration={200}
+              dimensionsAnimationType="worklet"
+              hapticsEnabled
+              onDragStart={() => setDragging(true)}
+              onDragEnd={({ data }) => { setDragging(false); setExercises(data); }}
+            />
             <TouchableOpacity style={styles.addExBtn} onPress={() => setActiveSwapId('__add__')}>
               <Text style={styles.addExBtnText}>+ Add exercise</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.endBtn} onPress={endWorkout}>
               <Text style={styles.endBtnText}>Finish workout</Text>
             </TouchableOpacity>
-          </ScrollView>
+          </Animated.ScrollView>
           </KeyboardAvoidingView>
 
-          {/* ── Active Swap / Add Modal ── */}
-          {activeSwapId !== null && (
-            <TouchableOpacity
-              style={swap.overlay}
-              activeOpacity={1}
-              onPress={() => { setActiveSwapId(null); setSwapQuery(''); }}
-            >
-              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-              <TouchableOpacity activeOpacity={1} onPress={() => {}}>
-                <View style={poster.swapSheet}>
-                  <Text style={poster.swapTitle}>{activeSwapId === '__add__' ? 'ADD EXERCISE' : 'SWAP EXERCISE'}</Text>
-                  <TextInput
-                    style={poster.swapSearch}
-                    value={swapQuery}
-                    onChangeText={setSwapQuery}
-                    placeholder="Search or type custom name…"
-                    placeholderTextColor="#444"
-                    autoCorrect={false}
-                  />
-                  <ScrollView style={{ maxHeight: 280 }}>
-                    {swapQuery.trim() !== '' && !getSwapOptions(activeSwapId === '__add__' ? '' : activeSwapId, exercises).some(o => o.name.toLowerCase() === swapQuery.trim().toLowerCase()) && (
-                      <TouchableOpacity
-                        style={poster.swapOption}
-                        onPress={() => {
-                          const customEx: Exercise = { id: `custom_${Date.now()}`, name: swapQuery.trim(), muscles: '', type: 'Iso', target: '', cue: '', sets: [{ weight: '', reps: '', rpe: '', drops: [] }] };
-                          if (activeSwapId === '__add__') {
-                            setExercises(prev => [...prev, customEx]);
-                          } else {
-                            setExercises(prev => prev.map(e => e.id === activeSwapId ? { ...customEx, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
-                          }
-                          setActiveSwapId(null);
-                          setSwapQuery('');
-                        }}
-                      >
-                        <Text style={poster.swapOptName}>&quot;{swapQuery.trim()}&quot;</Text>
-                        <Text style={poster.swapOptMuscles}>custom — tap to use</Text>
-                      </TouchableOpacity>
-                    )}
-                    {getSwapOptions(activeSwapId === '__add__' ? '' : activeSwapId, exercises)
-                      .filter(o => swapQuery.trim() === '' || o.name.toLowerCase().includes(swapQuery.trim().toLowerCase()) || o.muscles.toLowerCase().includes(swapQuery.trim().toLowerCase()))
-                      .map(opt => (
-                        <TouchableOpacity
-                          key={opt.id}
-                          style={poster.swapOption}
-                          onPress={() => {
-                            if (activeSwapId === '__add__') {
-                              setExercises(prev => [...prev, { ...opt, sets: [{ weight: '', reps: '', rpe: '', drops: [] }] }]);
-                            } else {
-                              setExercises(prev => prev.map(e => e.id === activeSwapId ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
-                            }
-                            setActiveSwapId(null);
-                            setSwapQuery('');
-                          }}
-                        >
-                          <Text style={poster.swapOptName}>{opt.name}</Text>
-                          <Text style={poster.swapOptMuscles}>{opt.muscles}</Text>
-                        </TouchableOpacity>
-                      ))}
-                  </ScrollView>
-                  <TouchableOpacity
-                    style={poster.swapClose}
-                    onPress={() => { setActiveSwapId(null); setSwapQuery(''); }}
-                  >
-                    <Text style={poster.swapCloseText}>CLOSE</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-              </KeyboardAvoidingView>
-            </TouchableOpacity>
-          )}
+          {/* ── Active swap / add sheet ── */}
+          <SwapSheet
+            open={activeSwapId !== null}
+            title={activeSwapId === '__add__' ? 'ADD EXERCISE' : 'SWAP EXERCISE'}
+            options={activeSwapId !== null ? getSwapOptions(activeSwapId === '__add__' ? '' : activeSwapId, exercises) : []}
+            onPick={opt => {
+              const id = activeSwapId;
+              if (id === '__add__') {
+                setExercises(prev => [...prev, { ...opt, sets: [{ weight: '', reps: '', rpe: '', drops: [] }] }]);
+              } else {
+                setExercises(prev => prev.map(e => e.id === id ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
+              }
+              setActiveSwapId(null);
+            }}
+            onCustom={name => {
+              const id = activeSwapId;
+              const customEx: Exercise = { id: `custom_${Date.now()}`, name, muscles: '', type: 'Iso', target: '', cue: '', sets: [{ weight: '', reps: '', rpe: '', drops: [] }] };
+              if (id === '__add__') {
+                setExercises(prev => [...prev, customEx]);
+              } else {
+                setExercises(prev => prev.map(e => e.id === id ? { ...customEx, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
+              }
+              setActiveSwapId(null);
+            }}
+            onClose={() => setActiveSwapId(null)}
+          />
         </View>
       )}
 
@@ -1307,7 +1257,7 @@ export default function HomeScreen() {
           bodyweight={bodyweight}
           onBodyweightChange={v => {
             setBodyweight(v);
-            FileSystem.writeAsStringAsync(BW_PATH, JSON.stringify(v));
+            FileSystem.writeAsStringAsync(BW_PATH, JSON.stringify(v)).catch(() => {});
           }}
           onDone={reset}
           onCoach={() => {
@@ -1325,17 +1275,17 @@ export default function HomeScreen() {
           onBack={() => setScreen(prevScreenRef.current)}
           onDelete={(id) => setHistory(prev => {
             const updated = prev.filter(e => e.id !== id);
-            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
+            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated)).catch(() => {});
             return updated;
           })}
           onMerge={(merged, removeId) => setHistory(prev => {
             const updated = prev.map(e => e.id === merged.id ? merged : e).filter(e => e.id !== removeId);
-            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated));
+            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated)).catch(() => {});
             return updated;
           })}
           onEditEntry={(updated) => setHistory(prev => {
             const next = prev.map(e => e.id === updated.id ? updated : e);
-            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(next));
+            FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(next)).catch(() => {});
             return next;
           })}
           programEpoch={programEpoch}
@@ -1477,17 +1427,4 @@ const poster = StyleSheet.create({
   supportDone: { fontSize: 10, color: Ink.textFaint },
 });
 
-const swap = StyleSheet.create({
-  btn: { marginTop: 10, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 14, borderWidth: 1, borderColor: '#ddd', borderRadius: 6 },
-  btnText: { fontSize: 12, color: Ink.textDim },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, gap: 12 },
-  sheetTitle: { fontSize: 18, fontWeight: '600' },
-  sheetSub: { fontSize: 14, color: Ink.textDim, lineHeight: 20 },
-  closeBtn: { marginTop: 8, paddingVertical: 12, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, alignItems: 'center' },
-  closeBtnText: { fontSize: 15, color: Ink.textFaint },
-  option: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  optionName: { fontSize: 15, fontWeight: '500', color: Ink.textFaint },
-  optionMuscles: { fontSize: 12, color: Ink.textDim, marginTop: 2 },
-});
 

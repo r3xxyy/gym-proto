@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { create } from 'zustand';
+import { PlateBar } from '@/components/plate-bar';
 import { Ink } from '@/constants/theme';
 import { nowMs } from '@/lib/format';
 import { estimate1RM } from '@/lib/progress';
@@ -27,6 +29,52 @@ let numpadNext: (() => void) | null = null;
 /** Called by the Next button in the keyboard bar. */
 export function runNumpadNext() { numpadNext?.(); }
 
+// Quick-adjust chips in the keyboard bar act on whichever field has focus.
+type NumpadOp = { step: number } | 'match';
+let numpadAdjust: ((op: NumpadOp) => void) | null = null;
+const useNumpadKind = create<{ kind: 'weight' | 'reps' | null }>(() => ({ kind: null }));
+const CHIPS: Record<'weight' | 'reps', { label: string; op: NumpadOp }[]> = {
+  weight: [
+    { label: '−2.5', op: { step: -2.5 } }, { label: '+2.5', op: { step: 2.5 } },
+    { label: '+5', op: { step: 5 } }, { label: 'Match', op: 'match' },
+  ],
+  reps: [
+    { label: '−1', op: { step: -1 } }, { label: '+1', op: { step: 1 } }, { label: 'Match', op: 'match' },
+  ],
+};
+
+export function NumpadChips() {
+  const kind = useNumpadKind(st => st.kind);
+  if (!kind) return null;
+  return (
+    <View style={chip.row}>
+      {CHIPS[kind].map(c => (
+        <TouchableOpacity key={c.label} style={chip.chip} onPress={() => numpadAdjust?.(c.op)} hitSlop={4}>
+          <Text style={chip.text}>{c.label}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+/** Event-handler read of a ref'd value (keeps the render-purity lint from tracing through callbacks). */
+function readLatest<T>(r: { current: T }): T { return r.current; }
+
+/** Shimmer sweep across the new-PR strip. */
+function PrStrip({ e1rm }: { e1rm: number }) {
+  const x = useSharedValue(-60);
+  useEffect(() => {
+    x.set(withDelay(150, withTiming(260, { duration: 900, easing: Easing.out(Easing.quad) })));
+  }, [x]);
+  const sweep = useAnimatedStyle(() => ({ transform: [{ translateX: x.get() }, { skewX: '-20deg' }] }));
+  return (
+    <View style={[aCard.prStrip, { overflow: 'hidden' }]}>
+      <Text style={aCard.prText}>New PR  ·  {e1rm} kg est. 1RM</Text>
+      <Animated.View pointerEvents="none" style={[aCard.prShimmer, sweep]} />
+    </View>
+  );
+}
+
 function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1 | 0 {
   const cur = parseFloat(currentWeight);
   const prev = parseFloat(prevWeight ?? '');
@@ -34,7 +82,7 @@ function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1
   return cur > prev ? 1 : -1;
 }
 
-function ExerciseCard({
+export function ExerciseCard({
   exercise,
   onChange,
   onSwap,
@@ -46,9 +94,12 @@ function ExerciseCard({
   prevLabel,
   prevSets2,
   prevLabel2,
+  dragActive,
 }: {
   exercise: Exercise;
   onChange: (updated: Exercise) => void;
+  /** True while the card is being dragged; shows the compact row so it travels a short distance. */
+  dragActive?: boolean;
   onSwap?: () => void;
   onRemove?: () => void;
   /** Called with the exercise up to and including the set that was just ticked. */
@@ -78,19 +129,51 @@ function ExerciseCard({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fieldRefs = useRef<(TextInput | null)[]>([]);
 
-  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  const prHapticTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    if (prHapticTimer.current) clearTimeout(prHapticTimer.current);
+  }, []);
+
+  // Numpad chips fire from a closure made at focus time, so edits read the latest props through this ref.
+  const latest = useRef({ exercise, onChange });
+  useEffect(() => { latest.current = { exercise, onChange }; });
+
+  // Drop refs left by deleted sets so Next never hops to an unmounted field (two fields per set: weight, reps).
+  useEffect(() => {
+    fieldRefs.current.length = exercise.sets.length * 2;
+    swipeRefs.current.length = exercise.sets.length;
+  });
 
   const allDone = exercise.sets.length > 0 && exercise.sets.every(s => s.done);
-  const collapsed = open === null ? allDone : !open;
+  // Stay open while the effort row is up, or the last set's RPE prompt never shows.
+  const collapsed = !!dragActive || (open === null ? allDone && rateOpen === null : !open);
   const doneSummary = exercise.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ');
 
   // Props for each numeric field: registers it so Next can hop to the following one.
   let slot = 0;
-  const field = () => {
+  const field = (si: number, li: number, kind: 'weight' | 'reps') => {
     const i = slot++;
     return {
       ref: (r: TextInput | null) => { fieldRefs.current[i] = r; },
       onFocus: () => {
+        useNumpadKind.setState({ kind });
+        numpadAdjust = (op) => {
+          const ex = readLatest(latest).exercise;
+          const set = ex.sets[si];
+          const line = li === 0 ? set : set?.drops[li - 1];
+          if (!line) return;
+          let next: number;
+          if (op === 'match') {
+            const g = parseFloat(ghostFor(si, ex)[kind]);
+            if (isNaN(g)) return;
+            next = g;
+          } else {
+            next = Math.max(0, (parseFloat(line[kind]) || 0) + op.step);
+          }
+          const v = String(Math.round(next * 100) / 100);
+          commitLine(si, li, kind, v);
+        };
         numpadNext = () => {
           const next = fieldRefs.current[i + 1];
           if (next) next.focus(); else Keyboard.dismiss();
@@ -101,17 +184,25 @@ function ExerciseCard({
     };
   };
 
-  function calcPlates(totalStr: string): string {
+  /** Plates needed on each side, heaviest first. */
+  function platesFor(totalStr: string): number[] {
     const total = parseFloat(totalStr) || 0;
     const bar = parseFloat(barWeight) || 0;
     const tare = parseFloat(tareWeight) || 0;
     let load = (total - bar - tare) / 2;
-    if (load <= 0) return 'no plates';
-    const used: string[] = [];
+    const used: number[] = [];
+    if (load <= 0) return used;
     for (const s of PLATE_SIZES) {
-      while (load >= s - 0.001) { used.push(`${s}`); load = Math.round((load - s) * 1000) / 1000; }
+      while (load >= s - 0.001) { used.push(s); load = Math.round((load - s) * 1000) / 1000; }
     }
-    return used.length ? used.join(' + ') + ' | per side' : 'no plates';
+    return used;
+  }
+
+  /** What a blank set would be filled with: the nearest earlier set in this session, else last session's matching set. */
+  function ghostFor(si: number, ex: Exercise): { weight: string; reps: string } {
+    const prior = ex.sets.slice(0, si).reverse().find(s => s.weight && s.reps);
+    const h = prior ?? prevSets?.[si];
+    return { weight: h?.weight ?? '', reps: h?.reps ?? '' };
   }
 
   function updateSet(si: number, field: 'weight' | 'reps', value: string) {
@@ -127,6 +218,17 @@ function ExerciseCard({
         : s
     );
     onChange({ ...exercise, sets });
+  }
+
+  /** Same edit as updateSet/updateDrop, for the numpad chips, which fire from a stale closure and so read the latest props. */
+  function commitLine(si: number, li: number, field: 'weight' | 'reps', value: string) {
+    const { exercise: ex, onChange: change } = readLatest(latest);
+    const sets = ex.sets.map((s, i) => {
+      if (i !== si) return s;
+      return li === 0 ? { ...s, [field]: value } : { ...s, drops: s.drops.map((d, j) => j === li - 1 ? { ...d, [field]: value } : d) };
+    });
+    const startedAt = li === 0 && field === 'weight' && !ex.startedAt ? nowMs() : ex.startedAt;
+    change({ ...ex, sets, startedAt });
   }
 
   function addSet() {
@@ -178,17 +280,28 @@ function ExerciseCard({
     }
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const sets = exercise.sets.map((s, i) => i === si ? { ...s, done: true } : s);
-    onChange({ ...exercise, sets, endedAt: nowMs() });
+    // A blank set ticks as its ghost values (the previous set / last session), so accepting takes one tap.
+    const g = ghostFor(si, exercise);
+    const sets = exercise.sets.map((s, i) => i === si ? { ...s, weight: s.weight || g.weight, reps: s.reps || g.reps, done: true } : s);
+    const startedAt = !exercise.startedAt && sets[si].weight ? nowMs() : exercise.startedAt;
+    onChange({ ...exercise, sets, startedAt, endedAt: nowMs() });
     setRateOpen(si);
     // A new best estimated 1RM, once this exercise has a history to beat.
     const est = estimate1RM(parseFloat(sets[si].weight) || 0, parseInt(sets[si].reps) || 0);
-    if (bestRef.current !== undefined && est > bestRef.current) {
+    const isPr = bestRef.current !== undefined && est > bestRef.current;
+    if (isPr) {
       bestRef.current = est;
       setPr({ si, e1rm: est });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      // Dual pulse: heavy thud, then a light tap.
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      if (prHapticTimer.current) clearTimeout(prHapticTimer.current);
+      prHapticTimer.current = setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 130);
     } else if (pr) {
       setPr(null);
+    }
+    // Last set of a compound lift done: success haptic too (the PR branch above already fired one).
+    if (!isPr && exercise.type === 'Compound' && sets.every(x => x.done)) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
@@ -289,9 +402,16 @@ function ExerciseCard({
                 placeholderTextColor={Ink.textFaint}
               />
             </View>
-            <Text style={aCard.plateResult}>
-              {displayWeight ? calcPlates(displayWeight) : 'enter a weight above'}
-            </Text>
+            {displayWeight ? (
+              <>
+                <PlateBar plates={platesFor(displayWeight)} />
+                <Text style={aCard.plateResult}>
+                  {platesFor(displayWeight).length ? platesFor(displayWeight).join(' + ') + ' | per side' : 'no plates'}
+                </Text>
+              </>
+            ) : (
+              <Text style={aCard.plateResult}>enter a weight above</Text>
+            )}
           </View>
         );
       })()}
@@ -299,6 +419,7 @@ function ExerciseCard({
       {exercise.sets.map((set, si) => {
         const isDone = !!set.done;
         const delta = setDelta(set.weight, prevSets?.[si]?.weight);
+        const ghost = isDone ? { weight: '', reps: '' } : ghostFor(si, exercise);
         // A set is the top set plus any drops; the tick sits on its last line.
         const lines = [
           { weight: set.weight, reps: set.reps, setW: (v: string) => updateSet(si, 'weight', v), setR: (v: string) => updateSet(si, 'reps', v) },
@@ -315,9 +436,7 @@ function ExerciseCard({
             friction={1.6}
             rightThreshold={90}
             overshootRight={false}
-            renderRightActions={() => (
-              <View style={aCard.swipeDelete}><Text style={aCard.swipeDeleteText}>Delete</Text></View>
-            )}
+            renderRightActions={() => <View style={aCard.swipeDelete} />}
             onSwipeableOpen={() => { swipeRefs.current[si]?.close(); deleteSet(si); }}
           >
             <View style={aCard.setBlock}>
@@ -339,9 +458,9 @@ function ExerciseCard({
                       value={ln.weight}
                       onChangeText={ln.setW}
                       keyboardType="decimal-pad"
-                      placeholder="kg"
-                      placeholderTextColor={Ink.textFaint}
-                      {...field()}
+                      placeholder={li === 0 && ghost.weight ? ghost.weight : 'kg'}
+                      placeholderTextColor={li === 0 && ghost.weight ? Ink.textDim : Ink.textFaint}
+                      {...field(si, li, 'weight')}
                     />
                     <Text style={aCard.sep}>×</Text>
                     <TextInput
@@ -349,9 +468,9 @@ function ExerciseCard({
                       value={ln.reps}
                       onChangeText={ln.setR}
                       keyboardType="number-pad"
-                      placeholder="reps"
-                      placeholderTextColor={Ink.textFaint}
-                      {...field()}
+                      placeholder={li === 0 && ghost.reps ? ghost.reps : 'reps'}
+                      placeholderTextColor={li === 0 && ghost.reps ? Ink.textDim : Ink.textFaint}
+                      {...field(si, li, 'reps')}
                     />
                     {last ? (
                       <TouchableOpacity
@@ -382,9 +501,7 @@ function ExerciseCard({
               )}
 
               {isDone && pr?.si === si && (
-                <View style={aCard.prStrip}>
-                  <Text style={aCard.prText}>New PR  ·  {pr.e1rm} kg est. 1RM</Text>
-                </View>
+                <PrStrip e1rm={pr.e1rm} />
               )}
 
               {isDone && rateOpen === si ? (
@@ -448,80 +565,6 @@ function ExerciseCard({
   );
 }
 
-// ─── Draggable Exercise Card ──────────────────────────────────────────────────
-
-export function DraggableCard({
-  exercise,
-  index,
-  total,
-  onChange,
-  onSwap,
-  onRemove,
-  onReorder,
-  onConfirmSet,
-  onRateSet,
-  bestE1RM,
-  prevSets,
-  prevLabel,
-  prevSets2,
-  prevLabel2,
-}: {
-  exercise: Exercise;
-  index: number;
-  total: number;
-  onChange: (updated: Exercise) => void;
-  onSwap: () => void;
-  onRemove: () => void;
-  onReorder: (from: number, to: number) => void;
-  onConfirmSet?: (exercise: Exercise) => void;
-  onRateSet?: (exercise: Exercise) => void;
-  bestE1RM?: number;
-  prevSets?: { weight: string; reps: string }[];
-  prevLabel?: string;
-  prevSets2?: { weight: string; reps: string }[];
-  prevLabel2?: string;
-}) {
-  const translateY = useSharedValue(0);
-  const dragging = useSharedValue(false);
-  const cardHeight = useSharedValue(220);
-
-  const gesture = Gesture.Pan()
-    .activateAfterLongPress(500)
-    .onStart(() => {
-      dragging.value = true;
-    })
-    .onUpdate(e => {
-      translateY.value = e.translationY;
-    })
-    .onEnd(() => {
-      const moved = Math.round(translateY.value / cardHeight.value);
-      const newIndex = Math.max(0, Math.min(total - 1, index + moved));
-      if (newIndex !== index) {
-        runOnJS(onReorder)(index, newIndex);
-      }
-      translateY.value = withSpring(0);
-      dragging.value = false;
-    });
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-    zIndex: dragging.value ? 10 : 1,
-    opacity: dragging.value ? 0.92 : 1,
-  }));
-
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View
-        style={animStyle}
-        onLayout={e => { cardHeight.value = e.nativeEvent.layout.height; }}
-      >
-        <ExerciseCard exercise={exercise} onChange={onChange} onSwap={onSwap} onRemove={onRemove} onConfirmSet={onConfirmSet} onRateSet={onRateSet} bestE1RM={bestE1RM} prevSets={prevSets} prevLabel={prevLabel} prevSets2={prevSets2} prevLabel2={prevLabel2} />
-      </Animated.View>
-    </GestureDetector>
-  );
-}
-
-
 // Active session card — dark concert poster treatment
 const aCard = StyleSheet.create({
   container: { backgroundColor: Ink.raised, borderRadius: 14, padding: 16, marginBottom: 12 },
@@ -567,12 +610,12 @@ const aCard = StyleSheet.create({
   dropArrow: { fontSize: 16, color: Ink.textFaint },
   prStrip: { alignSelf: 'flex-start', marginTop: 10, marginLeft: 48, backgroundColor: Ink.text, borderRadius: 14, paddingVertical: 6, paddingHorizontal: 12 },
   prText: { fontSize: 13, fontWeight: '800', color: Ink.bg },
+  prShimmer: { position: 'absolute', top: 0, bottom: 0, width: 36, backgroundColor: 'rgba(0,0,0,0.18)' },
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 48 },
   rateChip: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
   rateChipText: { fontSize: 14, fontWeight: '600', color: Ink.text },
   rateTag: { marginTop: 6, paddingLeft: 48 },
-  swipeDelete: { width: 110, backgroundColor: Ink.line, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
-  swipeDeleteText: { fontSize: 14, fontWeight: '700', color: Ink.text },
+  swipeDelete: { width: 72 },
   undoBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: Ink.bg, borderRadius: 10 },
   undoText: { fontSize: 14, color: Ink.textDim },
   undoBtn: { fontSize: 14, fontWeight: '700', color: Ink.text },
@@ -597,3 +640,9 @@ const aCard = StyleSheet.create({
   rpeGuideDesc: { fontSize: 12, color: Ink.textFaint, flex: 1 },
 });
 
+
+const chip = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 8 },
+  chip: { minHeight: 32, paddingHorizontal: 12, justifyContent: 'center', borderWidth: 1, borderColor: Ink.line, borderRadius: 16 },
+  text: { fontSize: 14, fontWeight: '600', color: Ink.text },
+});

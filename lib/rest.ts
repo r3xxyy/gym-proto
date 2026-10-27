@@ -61,3 +61,9 @@ export function getRestDuration(exercise: Exercise): number {
   return REST_TIERS[tier][band];
 }
 
+
+/** A near-max (RPE 9+) set on a compound lift, which gets the longest rest in its tier. */
+export function isHeavySet(exercise: Exercise): boolean {
+  const rpe = parseFloat(exercise.sets[exercise.sets.length - 1]?.rpe ?? '');
+  return exercise.type === 'Compound' && !isNaN(rpe) && rpe >= 9;
+}
