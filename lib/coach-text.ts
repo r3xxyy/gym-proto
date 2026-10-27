@@ -1,6 +1,6 @@
 import type { Exercise, HistoryEntry } from '../types';
 import { PROGRAM_EPOCH, SPLIT, WEEK_DAYS, WORKOUT_TO_DAY } from '../constants/programs';
-import { formatTime, parseHistoryDate } from './format';
+import { formatTime, parseDateLocal } from './format';
 import { getMostRecentSession } from './history-lookup';
 import { estimateNetKcal, sessionVolume } from './session-stats';
 
@@ -39,7 +39,7 @@ export function formatSessionForCoach(
     ? getMostRecentSession(workoutName, history.filter(h => h.date !== date)).entry
     : null;
   const prevWkNum = prevSession
-    ? Math.max(1, Math.floor((parseHistoryDate(prevSession.date) - epoch) / (7 * 24 * 60 * 60 * 1000)) + 1)
+    ? Math.max(1, Math.floor((parseDateLocal(prevSession.date) - epoch) / (7 * 24 * 60 * 60 * 1000)) + 1)
     : null;
 
   exs.forEach(ex => {
@@ -175,7 +175,7 @@ export function formatUpcomingSessionForCoach(
   // ── Last week's same session ──
   const lastWeekEntry = [...history]
     .filter(h => h.workoutName === workoutName)
-    .sort((a, b) => parseHistoryDate(b.date) - parseHistoryDate(a.date))
+    .sort((a, b) => parseDateLocal(b.date) - parseDateLocal(a.date))
     .slice(1, 2)[0]; // skip most recent, take previous (date-sorted)
 
   if (lastWeekEntry) {

@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Ink } from '@/constants/theme';
 import { PROGRAM_EPOCH, SPLIT_LABEL, WORKOUT_ORDER, WORKOUT_TO_DAY } from '../constants/programs';
 import { formatSessionForCoach } from '@/lib/coach-text';
-import { formatTime, parseHistoryDate, shortGym } from '@/lib/format';
+import { formatTime, parseDateLocal, shortGym } from '@/lib/format';
 import { sessionVolume } from '@/lib/session-stats';
 import { NUMPAD_DONE_ID } from './exercise-card';
 import type { Exercise, HistoryEntry } from '../types';
@@ -188,20 +188,20 @@ export function HistoryScreen({ history, onBack, onDelete, onMerge, onEditEntry,
   // Newest first, then grouped into program weeks.
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   const sorted = [...history].sort((a, b) => {
-    const d = parseHistoryDate(b.date) - parseHistoryDate(a.date);
+    const d = parseDateLocal(b.date) - parseDateLocal(a.date);
     return d !== 0 ? d : b.id.localeCompare(a.id);
   });
   const visible = filter === 'All' ? sorted : sorted.filter(e => e.workoutName === filter && !e.isRestDay);
   const weeks: { num: number; entries: HistoryEntry[] }[] = [];
   for (const entry of visible) {
-    const num = Math.floor((parseHistoryDate(entry.date) - programEpoch) / weekMs) + 1;
+    const num = Math.floor((parseDateLocal(entry.date) - programEpoch) / weekMs) + 1;
     const last = weeks[weeks.length - 1];
     if (last && last.num === num) last.entries.push(entry);
     else weeks.push({ num, entries: [entry] });
   }
 
   const dayLabel = (date: string) => {
-    const ts = parseHistoryDate(date);
+    const ts = parseDateLocal(date);
     return ts ? new Date(ts).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '') : date;
   };
 

@@ -1,5 +1,5 @@
 import type { HistoryEntry } from '../types';
-import { parseHistoryDate } from './format';
+import { parseDateLocal } from './format';
 
 // Returns the most recent history entry for a given workoutName.
 // If gym is provided: tries same-gym first; falls back to global with crossGym=true.
@@ -12,7 +12,7 @@ export function getMostRecentSession(
   const matching = history.filter(h => h.workoutName === workoutName);
   if (matching.length === 0) return { entry: null, crossGym: false };
   const best = (arr: HistoryEntry[]) =>
-    arr.reduce((a, b) => parseHistoryDate(b.date) > parseHistoryDate(a.date) ? b : a);
+    arr.reduce((a, b) => parseDateLocal(b.date) > parseDateLocal(a.date) ? b : a);
   if (gym) {
     const sameGym = matching.filter(h => h.gym === gym);
     if (sameGym.length > 0) return { entry: best(sameGym), crossGym: false };
@@ -29,7 +29,7 @@ export function getMostRecentSessionOtherGym(
 ): HistoryEntry | null {
   const matching = history.filter(h => h.workoutName === workoutName && h.gym && h.gym !== excludeGym);
   if (matching.length === 0) return null;
-  return matching.reduce((a, b) => parseHistoryDate(b.date) > parseHistoryDate(a.date) ? b : a);
+  return matching.reduce((a, b) => parseDateLocal(b.date) > parseDateLocal(a.date) ? b : a);
 }
 
 export function getPrevSets(exName: string, workoutName: string, history: HistoryEntry[], gym?: string): { weight: string; reps: string }[] {

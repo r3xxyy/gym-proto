@@ -1,5 +1,6 @@
 import type { HistoryEntry } from '../types';
-import { exerciseSeries, parseDateLocal } from './progress';
+import { parseDateLocal } from './format';
+import { exerciseSeries } from './progress';
 import { sessionVolume } from './session-stats';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

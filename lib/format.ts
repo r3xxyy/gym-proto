@@ -1,24 +1,19 @@
 /** Wall-clock read for event handlers; lives outside components so the React Compiler doesn't flag it as an impure render call. */
 export const nowMs = () => Date.now();
 
-const _MONTH_IDX: Record<string, number> = {
-  jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11
+const MONTH_IDX: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
-export function parseHistoryDate(dateStr: string): number {
-  // Input: "Mon, 8 Jun 2026" or "8 Jun 2026"
-  const cleaned = dateStr.replace(/^[A-Za-z]+,\s*/, '').trim();
-  const parts = cleaned.split(/\s+/);
-  if (parts.length === 3) {
-    const day   = parseInt(parts[0], 10);
-    const month = _MONTH_IDX[parts[1].toLowerCase().slice(0, 3)];
-    const year  = parseInt(parts[2], 10);
-    if (!isNaN(day) && month !== undefined && !isNaN(year)) {
-      return new Date(year, month, day).getTime(); // local midnight — matches PROGRAM_EPOCH construction
-    }
-  }
-  return 0;
-}
 
+/** Parses "Mon, 8 Jun 2026" / "8 Jun 2026" as LOCAL midnight (matches PROGRAM_EPOCH; avoids UTC skew). Returns 0 if it can't. */
+export function parseDateLocal(dateStr: string): number {
+  // en-GB can abbreviate September as "Sept", so only the first three letters of the month count.
+  const m = dateStr.match(/(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})/);
+  if (!m) return 0;
+  const month = MONTH_IDX[m[2].slice(0, 3).toLowerCase()];
+  if (month === undefined) return 0;
+  return new Date(parseInt(m[3], 10), month, parseInt(m[1], 10)).getTime();
+}
 
 export function formatTime(totalSeconds: number) {
   const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');

@@ -1,17 +1,6 @@
 import type { Exercise, HistoryEntry } from '../types';
+import { parseDateLocal } from './format';
 import { sessionVolume } from './session-stats';
-
-const MONTH_IDX: Record<string, number> = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
-
-/** Parses "Tue, 14 Apr 2026" as LOCAL midnight, avoiding UTC skew on negative offsets. NaN if it can't. */
-export function parseDateLocal(dateStr: string): number {
-  // en-GB can abbreviate September as "Sept", so only the first three letters count.
-  const m = dateStr.match(/(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})/);
-  if (!m) return NaN;
-  const month = MONTH_IDX[m[2].slice(0, 1).toUpperCase() + m[2].slice(1, 3).toLowerCase()];
-  if (month === undefined) return NaN;
-  return new Date(parseInt(m[3]), month, parseInt(m[1])).getTime();
-}
 
 /** Sets that count towards stats: filled in, and not explicitly left unticked. */
 export function countedSets(ex: Pick<Exercise, 'sets'>) {
@@ -39,7 +28,7 @@ export function exerciseSeries(history: HistoryEntry[], name: string): SeriesPoi
   for (const entry of history) {
     if (entry.isRestDay) continue;
     const ts = parseDateLocal(entry.date);
-    if (isNaN(ts)) continue;
+    if (!ts) continue;
     for (const ex of entry.exercises) {
       if (ex.name !== name) continue;
       const sets = countedSets(ex);

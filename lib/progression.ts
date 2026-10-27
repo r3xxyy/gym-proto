@@ -1,6 +1,6 @@
 import type { Exercise, HistoryEntry } from '../types';
 import { SPLIT } from '../constants/programs';
-import { parseHistoryDate } from './format';
+import { parseDateLocal } from './format';
 import { countedSets } from './progress';
 
 type Planned = Omit<Exercise, 'sets'>;
@@ -66,7 +66,7 @@ export function deriveTargets(
   for (const day of [1, 2, 3, 4, 5] as const) {
     const lastEntry = history
       .filter(h => h.workoutName === SPLIT[day] && !h.isRestDay)
-      .sort((a, b) => parseHistoryDate(b.date) - parseHistoryDate(a.date))[0];
+      .sort((a, b) => parseDateLocal(b.date) - parseDateLocal(a.date))[0];
     result[day] = (base[day] ?? []).map(ex => {
       const last = lastEntry?.exercises.find(e => e.name === ex.name);
       return last ? { ...ex, target: nextTarget(ex, last) } : ex;
