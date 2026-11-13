@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import Svg, { Line, Rect } from 'react-native-svg';
 import { create } from 'zustand';
 import { PlateBar } from '@/components/plate-bar';
 import { Ink } from '@/constants/theme';
+import { CLAMP_MS, fireLock } from '@/lib/lock-store';
 import { nowMs } from '@/lib/format';
 import { estimate1RM } from '@/lib/progress';
 import type { Exercise } from '../types';
@@ -75,44 +78,20 @@ function PrStrip({ e1rm }: { e1rm: number }) {
   );
 }
 
-/** Set tick: pops and sends out a ring when it flips to done. Skips the initial mount so restored sets stay still. */
+/** Done tick: a small carabiner, clasped, in place of the check. */
 function TickButton({ done, onPress, label }: { done: boolean; onPress: () => void; label: string }) {
-  const scale = useSharedValue(1);
-  const ring = useSharedValue(0);
-  const seen = useRef(done);
-  useEffect(() => {
-    if (done === seen.current) return;
-    seen.current = done;
-    if (!done) return;
-    scale.set(withSequence(withTiming(0.82, { duration: 70 }), withSpring(1, { damping: 7, stiffness: 320 })));
-    ring.set(0);
-    ring.set(withTiming(1, { duration: 520, easing: Easing.out(Easing.cubic) }));
-  }, [done, scale, ring]);
-  const pop = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
-  const ringStyle = useAnimatedStyle(() => ({
-    opacity: (1 - ring.get()) * 0.7,
-    transform: [{ scale: 1 + ring.get() * 1.4 }],
-  }));
   return (
-    <View style={aCard.tickWrap}>
-      <Animated.View pointerEvents="none" style={[aCard.tickRing, ringStyle]} />
-      <Animated.View style={pop}>
-        <TouchableOpacity onPress={onPress} style={[aCard.confirmBtn, done && aCard.confirmBtnDone]} accessibilityLabel={label}>
-          <Text style={[aCard.confirmBtnText, done && aCard.confirmBtnTextDone]}>✓</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+    <TouchableOpacity onPress={onPress} style={[aCard.confirmBtn, done && aCard.confirmBtnDone]} accessibilityLabel={label}>
+      {done ? (
+        <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+          <Rect x={7} y={2.5} width={10} height={19} rx={5} stroke={Ink.bg} strokeWidth={2.2} />
+          <Line x1={17} y1={8.5} x2={17} y2={15.5} stroke={Ink.bg} strokeWidth={4} strokeLinecap="round" />
+        </Svg>
+      ) : (
+        <Text style={aCard.confirmBtnText}>✓</Text>
+      )}
+    </TouchableOpacity>
   );
-}
-
-/** One chrome sweep across a card as it locks into its compact row. */
-function LockSweep() {
-  const x = useSharedValue(-80);
-  useEffect(() => {
-    x.set(withTiming(420, { duration: 650, easing: Easing.out(Easing.quad) }));
-  }, [x]);
-  const sweep = useAnimatedStyle(() => ({ transform: [{ translateX: x.get() }, { skewX: '-20deg' }] }));
-  return <Animated.View pointerEvents="none" style={[aCard.lockSweep, sweep]} />;
 }
 
 function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1 | 0 {
@@ -169,10 +148,16 @@ export function ExerciseCard({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fieldRefs = useRef<(TextInput | null)[]>([]);
 
-  const prHapticTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The lock haptic lands when the carabiner closes, so it waits on timers that must not outlive the tick.
+  const lockTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const rowRefs = useRef<(ComponentRef<typeof View> | null)[]>([]);
+  const clearLockTimers = () => {
+    lockTimers.current.forEach(clearTimeout);
+    lockTimers.current = [];
+  };
   useEffect(() => () => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
-    if (prHapticTimer.current) clearTimeout(prHapticTimer.current);
+    clearLockTimers();
   }, []);
 
   // Numpad chips fire from a closure made at focus time, so edits read the latest props through this ref.
@@ -183,6 +168,7 @@ export function ExerciseCard({
   useEffect(() => {
     fieldRefs.current.length = exercise.sets.length * 2;
     swipeRefs.current.length = exercise.sets.length;
+    rowRefs.current.length = exercise.sets.length;
   });
 
   const allDone = exercise.sets.length > 0 && exercise.sets.every(s => s.done);
@@ -310,16 +296,33 @@ export function ExerciseCard({
     onChange({ ...exercise, sets });
   }
 
+  /** Chain the row shut, and land the haptic as the carabiner closes. A PR gets its two-beat pulse instead. */
+  function lockSet(si: number, isPr: boolean) {
+    clearLockTimers();
+    const buzz = (delay: number) => {
+      lockTimers.current.push(setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+        if (isPr) lockTimers.current.push(setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 130));
+      }, delay));
+    };
+    const row = rowRefs.current[si];
+    if (!row) { buzz(0); return; }
+    row.measureInWindow((x, y, w, h) => {
+      if (w > 0 && h > 0) fireLock({ x, y, w, h });
+      buzz(w > 0 && h > 0 ? CLAMP_MS : 0);
+    });
+  }
+
   function toggleDone(si: number) {
     if (exercise.sets[si].done) {
       // tick again to take it back
       onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false } : s) });
+      clearLockTimers();
       setRateOpen(null);
       if (pr?.si === si) setPr(null);
       return;
     }
     Keyboard.dismiss();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     // A blank set ticks as its ghost values (the previous set / last session), so accepting takes one tap.
     const g = ghostFor(si, exercise);
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, weight: s.weight || g.weight, reps: s.reps || g.reps, done: true } : s);
@@ -332,17 +335,10 @@ export function ExerciseCard({
     if (isPr) {
       bestRef.current = est;
       setPr({ si, e1rm: est });
-      // Dual pulse: heavy thud, then a light tap.
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-      if (prHapticTimer.current) clearTimeout(prHapticTimer.current);
-      prHapticTimer.current = setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 130);
     } else if (pr) {
       setPr(null);
     }
-    // Last set of a compound lift done: success haptic too (the PR branch above already fired one).
-    if (!isPr && exercise.type === 'Compound' && sets.every(x => x.done)) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    }
+    lockSet(si, isPr);
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
 
@@ -355,13 +351,12 @@ export function ExerciseCard({
 
   if (collapsed) {
     return (
-      <TouchableOpacity style={[aCard.collapsed, { overflow: 'hidden' }]} onPress={() => setOpen(true)} activeOpacity={0.7}>
-        {allDone && !compact && <LockSweep />}
+      <TouchableOpacity style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
         <View style={{ flex: 1 }}>
           <Text style={aCard.collapsedName} numberOfLines={1}>{exercise.name}</Text>
           {doneSummary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{doneSummary}</Text> : null}
         </View>
-        {allDone ? <Animated.Text entering={ZoomIn.springify().damping(8)} style={aCard.collapsedTick}>✓</Animated.Text> : null}
+        {allDone ? <Text style={aCard.collapsedTick}>✓</Text> : null}
       </TouchableOpacity>
     );
   }
@@ -484,7 +479,7 @@ export function ExerciseCard({
               {lines.map((ln, li) => {
                 const last = li === lines.length - 1;
                 return (
-                  <View key={li} style={[aCard.setRow, li > 0 && { marginTop: 8 }]}>
+                  <View key={li} ref={last ? (r => { rowRefs.current[si] = r; }) : undefined} style={[aCard.setRow, li > 0 && { marginTop: 8 }]}>
                     <View style={aCard.setNumWrap}>
                       {li === 0 ? (
                         <Text style={[aCard.setNum, isDone && aCard.setNumConfirmed]}>
@@ -664,9 +659,6 @@ const aCard = StyleSheet.create({
   collapsed: { flexDirection: 'row', alignItems: 'center', backgroundColor: Ink.raised, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 12, gap: 12 },
   collapsedName: { fontFamily: 'Unbounded_500Medium', fontSize: 14, color: Ink.textDim },
   collapsedSets: { fontSize: 13, color: Ink.textFaint, marginTop: 3, fontVariant: ['tabular-nums'] },
-  tickWrap: { alignItems: 'center', justifyContent: 'center' },
-  tickRing: { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: Ink.text },
-  lockSweep: { position: 'absolute', top: 0, bottom: 0, width: 40, backgroundColor: 'rgba(255,255,255,0.12)' },
   collapsedTick: { fontSize: 18, color: Ink.text },
   // Plate calculator
   plateCalc: { backgroundColor: Ink.bg, borderRadius: 12, padding: 12, marginTop: 12 },

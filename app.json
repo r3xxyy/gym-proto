@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.r3xxy.gymproto",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Connects to your Mac's dev server for live reloads.",
+        "NSBonjourServices": ["_expo._tcp", "_rct._tcp", "_http._tcp"]
       }
     },
     "android": {

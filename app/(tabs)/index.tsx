@@ -28,6 +28,8 @@ import { HistoryScreen } from '@/components/history-screen';
 import { SummaryScreen } from '@/components/summary-screen';
 
 import { ChromeChains } from '@/components/chrome-chains';
+import { LockChainOverlay } from '@/components/lock-chain-overlay';
+import { fadeAllLocks } from '@/lib/lock-store';
 import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
@@ -1206,7 +1208,7 @@ export default function HomeScreen() {
             )}
           </View>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <Animated.ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          <Animated.ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" onScrollBeginDrag={fadeAllLocks}>
             {exercises.length > 1 && (
               <TouchableOpacity style={styles.reorderBtn} onPress={() => setReorder(r => !r)} hitSlop={8}>
                 <Text style={styles.reorderBtnText}>{reorder ? 'Done' : 'Reorder'}</Text>
@@ -1234,6 +1236,9 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Animated.ScrollView>
           </KeyboardAvoidingView>
+
+          {/* Chains that lock a set when it's ticked; draws only while one is playing. */}
+          <LockChainOverlay />
 
           {/* ── Active swap / add sheet ── */}
           <SwapSheet
