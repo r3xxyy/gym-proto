@@ -13,9 +13,32 @@ export const KILL_MS = 100;    // quick fade when the list scrolls
 const MAX_LOCKS = 4;
 let nextId = 1;
 
-type LockState = { locks: Lock[] };
+/** An exercise that has just been finished: its card floats to centre, gets chained, then slams back. */
+export type Stage = { id: string; name: string; summary: string; from: LockRect };
 
-export const useLockStore = create<LockState>(() => ({ locks: [] }));
+type LockState = {
+  locks: Lock[];
+  stage: Stage | null;
+  /** Set for one render so the named card can open itself; the card clears it. */
+  openRequestId: string | null;
+};
+
+export const useLockStore = create<LockState>(() => ({ locks: [], stage: null, openRequestId: null }));
+
+export const startStage = (stage: Stage) => {
+  if (!useLockStore.getState().stage) useLockStore.setState({ stage });
+};
+export const endStage = () => {
+  if (useLockStore.getState().stage) useLockStore.setState({ stage: null });
+};
+export const requestOpen = (id: string) => useLockStore.setState({ openRequestId: id });
+export const consumeOpenRequest = () => useLockStore.setState({ openRequestId: null });
+
+// Cards register their root view so the screen can measure any of them (e.g. to scroll one into view).
+const cards = new Map<string, { current: any }>();
+export const registerCard = (id: string, ref: { current: any }) => { cards.set(id, ref); };
+export const unregisterCard = (id: string) => { cards.delete(id); };
+export const getCard = (id: string) => cards.get(id)?.current ?? null;
 
 export const fireLock = (rect: LockRect) =>
   useLockStore.setState(s => ({

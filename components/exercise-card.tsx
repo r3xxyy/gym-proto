@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import * as Haptics from 'expo-haptics';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
@@ -7,7 +6,7 @@ import Svg, { Line, Rect } from 'react-native-svg';
 import { create } from 'zustand';
 import { PlateBar } from '@/components/plate-bar';
 import { Ink } from '@/constants/theme';
-import { fireLock, LOCK_MS } from '@/lib/lock-store';
+import { consumeOpenRequest, registerCard, startStage, unregisterCard, useLockStore } from '@/lib/lock-store';
 import { nowMs } from '@/lib/format';
 import { estimate1RM } from '@/lib/progress';
 import type { Exercise } from '../types';
@@ -87,6 +86,28 @@ function CarabinerGlyph({ color, size = 22 }: { color: string; size?: number }) 
   );
 }
 
+/** The compact row: used for the real collapsed card and for the clone that floats while it is chained. */
+export function CollapsedRow({
+  name, summary, done, onPress, style, cardRef,
+}: {
+  name: string;
+  summary: string;
+  done: boolean;
+  onPress?: () => void;
+  style?: any;
+  cardRef?: any;
+}) {
+  return (
+    <TouchableOpacity ref={cardRef} style={[aCard.collapsed, style]} onPress={onPress} activeOpacity={onPress ? 0.7 : 1} disabled={!onPress}>
+      <View style={{ flex: 1 }}>
+        <Text style={aCard.collapsedName} numberOfLines={1}>{name}</Text>
+        {summary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{summary}</Text> : null}
+      </View>
+      {done ? <CarabinerGlyph color={Ink.textDim} /> : null}
+    </TouchableOpacity>
+  );
+}
+
 function TickButton({ done, onPress, label }: { done: boolean; onPress: () => void; label: string }) {
   return (
     <TouchableOpacity onPress={onPress} style={[aCard.confirmBtn, done && aCard.confirmBtnDone]} accessibilityLabel={label}>
@@ -152,20 +173,26 @@ export function ExerciseCard({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fieldRefs = useRef<(TextInput | null)[]>([]);
 
-  // Finishing an exercise chains its collapsed card shut. The timers (measure, then the closing buzz)
-  // must not outlive the card staying collapsed, so they are cleared on reopen, reorder and unmount.
-  const lockTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Finishing an exercise hands its collapsed card to the lock stage. The measure timer must not
+  // outlive the card staying collapsed, so it is cleared on reopen, reorder and unmount.
+  const stageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cardRef = useRef<any>(null);
   const finishedByRate = useRef(false);
   const wasCollapsed = useRef(false);
-  const clearLockTimers = () => {
-    lockTimers.current.forEach(clearTimeout);
-    lockTimers.current = [];
+  const clearStageTimer = () => {
+    if (stageTimer.current) clearTimeout(stageTimer.current);
+    stageTimer.current = null;
   };
   useEffect(() => () => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
-    clearLockTimers();
+    clearStageTimer();
   }, []);
+  useEffect(() => {
+    registerCard(exercise.id, cardRef);
+    return () => unregisterCard(exercise.id);
+  }, [exercise.id]);
+  const staged = useLockStore(s => s.stage?.id === exercise.id);
+  const openRequested = useLockStore(s => s.openRequestId === exercise.id);
 
   // Numpad chips fire from a closure made at focus time, so edits read the latest props through this ref.
   const latest = useRef({ exercise, onChange });
@@ -182,7 +209,7 @@ export function ExerciseCard({
   const collapsed = !!compact || (open === null ? allDone && rateOpen === null : !open);
   const doneSummary = exercise.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ');
 
-  // The card just collapsed because its last set was rated: once it has settled, chain it shut.
+  // The card just collapsed because its last set was rated: once it has settled, hand it to the stage.
   const lockNow = collapsed && allDone && !compact;
   useEffect(() => {
     const justCollapsed = collapsed && !wasCollapsed.current;
@@ -190,15 +217,20 @@ export function ExerciseCard({
     if (!justCollapsed || !lockNow || !finishedByRate.current) return;
     finishedByRate.current = false;
     // The grid animates the height change, so wait for it before measuring the card.
-    lockTimers.current.push(setTimeout(() => {
+    stageTimer.current = setTimeout(() => {
       cardRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
         if (w <= 0 || h <= 0) return;
-        fireLock({ x, y, w, h });
-        lockTimers.current.push(setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), LOCK_MS));
+        startStage({ id: exercise.id, name: exercise.name, summary: doneSummary, from: { x, y, w, h } });
       });
-    }, SETTLE_MS));
-    return clearLockTimers;
+    }, SETTLE_MS);
+    return clearStageTimer;
   }, [collapsed, lockNow]);
+
+  // Asked to open (the card after one that was just finished): follow progress again, so it expands.
+  if (openRequested && open !== null && !compact && collapsed && !allDone) setOpen(null);
+  useEffect(() => {
+    if (openRequested) consumeOpenRequest();
+  }, [openRequested]);
 
   // Props for each numeric field: registers it so Next can hop to the following one.
   let slot = 0;
@@ -357,13 +389,14 @@ export function ExerciseCard({
 
   if (collapsed) {
     return (
-      <TouchableOpacity ref={cardRef} style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
-        <View style={{ flex: 1 }}>
-          <Text style={aCard.collapsedName} numberOfLines={1}>{exercise.name}</Text>
-          {doneSummary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{doneSummary}</Text> : null}
-        </View>
-        {allDone ? <CarabinerGlyph color={Ink.textDim} /> : null}
-      </TouchableOpacity>
+      <CollapsedRow
+        cardRef={cardRef}
+        name={exercise.name}
+        summary={doneSummary}
+        done={allDone}
+        onPress={() => setOpen(true)}
+        style={staged ? { opacity: 0 } : undefined}
+      />
     );
   }
 
@@ -373,7 +406,7 @@ export function ExerciseCard({
   const targetDir = prevMax && targetW ? (targetW > prevMax ? '▲ ' : targetW < prevMax ? '▼ ' : '') : '';
 
   return (
-    <View style={aCard.container}>
+    <View ref={cardRef} style={aCard.container}>
       <View style={aCard.header}>
         <TouchableOpacity style={{ flex: 1 }} onPress={() => setOpen(false)} activeOpacity={0.7}>
           <Text style={aCard.name}>{exercise.name}</Text>

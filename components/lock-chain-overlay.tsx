@@ -11,7 +11,7 @@ import type { Lock } from '@/lib/lock-store';
 // Mesh units are scaled to points. The carabiner is chunkier than the links so it reads as the clasp.
 const LINK_SCALE = 40;
 const CARABINER_SCALE = 30;
-const CARABINER_RIGHT_INSET = 26; // carabiner centre sits this far from the row's right edge, over the tick
+const CARABINER_RIGHT_INSET = 29; // carabiner centre sits this far from the card's right edge, over the done glyph (27pt at 1.08x)
 // Centre-to-centre distance between the carabiner and the link hooked on its left, in points.
 const HOOK_GAP = CARABINER_SCALE * 0.675 + LINK_SCALE * 0.315;
 

@@ -29,7 +29,8 @@ import { SummaryScreen } from '@/components/summary-screen';
 
 import { ChromeChains } from '@/components/chrome-chains';
 import { LockChainOverlay } from '@/components/lock-chain-overlay';
-import { fadeAllLocks } from '@/lib/lock-store';
+import { LockStage } from '@/components/lock-stage';
+import { fadeAllLocks, getCard, requestOpen } from '@/lib/lock-store';
 import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
@@ -149,6 +150,29 @@ export default function HomeScreen() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [reorder, setReorder] = useState(false);
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
+  const listTopRef = useRef<any>(null); // zero-height marker at the top of the list content
+  const exercisesRef = useRef<Exercise[]>([]);
+  useEffect(() => { exercisesRef.current = exercises; });
+
+  // After a finished exercise slams home: open the next unfinished one and bring it to the top.
+  function onStageDone(doneId: string) {
+    const list = exercisesRef.current;
+    const at = list.findIndex(e => e.id === doneId);
+    const open = (e: Exercise) => e.id !== doneId && e.sets.some(x => !x.done);
+    const next = list.slice(at + 1).find(open) ?? list.find(open);
+    if (!next) return;
+    requestOpen(next.id);
+    // Let the grid finish growing the card before measuring where to scroll.
+    setTimeout(() => {
+      const card = getCard(next.id), top = listTopRef.current;
+      if (!card || !top) return;
+      top.measureInWindow((_x: number, topY: number) => {
+        card.measureInWindow((_cx: number, cardY: number) => {
+          (scrollRef.current as any)?.scrollTo?.({ y: Math.max(0, cardY - topY - 8), animated: true });
+        });
+      });
+    }, 350);
+  }
   const [programEpoch, setProgramEpoch] = useState(PROGRAM_EPOCH);
   const currentWeek = getCurrentProgramWeek(programEpoch);
   const [weekPlan, setWeekPlan] = useState<Record<number, Omit<Exercise, 'sets'>[]>>(() => {
@@ -1209,6 +1233,7 @@ export default function HomeScreen() {
           </View>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" onScrollBeginDrag={fadeAllLocks}>
+            <View ref={listTopRef} collapsable={false} style={{ height: 0 }} />
             {exercises.length > 1 && (
               <TouchableOpacity style={styles.reorderBtn} onPress={() => setReorder(r => !r)} hitSlop={8}>
                 <Text style={styles.reorderBtnText}>{reorder ? 'Done' : 'Reorder'}</Text>
@@ -1237,7 +1262,8 @@ export default function HomeScreen() {
           </Animated.ScrollView>
           </KeyboardAvoidingView>
 
-          {/* Chains that lock a set when it's ticked; draws only while one is playing. */}
+          {/* A finished exercise floats to centre, gets chained, then slams back; the chain draws above it. */}
+          <LockStage onDone={onStageDone} />
           <LockChainOverlay />
 
           {/* ── Active swap / add sheet ── */}
