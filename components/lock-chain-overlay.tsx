@@ -14,14 +14,13 @@ const CARABINER_SCALE = 30;
 const CARABINER_RIGHT_INSET = 26; // carabiner centre sits this far from the row's right edge, over the tick
 // Centre-to-centre distance between the carabiner and the link hooked on its left, in points.
 const HOOK_GAP = CARABINER_SCALE * 0.675 + LINK_SCALE * 0.315;
-const ROW_FALLBACK = 48;
 
 const easeOut = (x: number) => 1 - Math.pow(1 - x, 3);
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 /**
- * One transparent GL layer over the session. Idle it costs nothing: it draws only while a set is
- * being locked, then stops. Each lock is scissored to its own row, so no chain can leave the row.
+ * One transparent GL layer over the session. Idle it costs nothing: it draws only while an exercise
+ * is being locked, then stops. Each lock is scissored to its own card, so no chain can leave it.
  */
 export function LockChainOverlay() {
   const boxRef = useRef<ComponentRef<typeof View>>(null);
@@ -129,7 +128,7 @@ export function LockChainOverlay() {
         gl.clear(gl.DEPTH_BUFFER_BIT);
 
         const age = now - lock.startedAt;
-        const cy = ry + Math.min(rect.h, ROW_FALLBACK) / 2;
+        const cy = ry + rect.h / 2;
         const cx = rx + rect.w - CARABINER_RIGHT_INSET;
         // The chain runs in from the row's left edge, carabiner leading, and is taut when it lands.
         const slide = -(1 - easeOut(clamp01(age / CLAMP_MS))) * (cx - rx + 60);

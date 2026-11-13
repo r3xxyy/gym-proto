@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ComponentRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -8,7 +7,7 @@ import Svg, { Line, Rect } from 'react-native-svg';
 import { create } from 'zustand';
 import { PlateBar } from '@/components/plate-bar';
 import { Ink } from '@/constants/theme';
-import { CLAMP_MS, fireLock } from '@/lib/lock-store';
+import { fireLock, LOCK_MS } from '@/lib/lock-store';
 import { nowMs } from '@/lib/format';
 import { estimate1RM } from '@/lib/progress';
 import type { Exercise } from '../types';
@@ -78,21 +77,26 @@ function PrStrip({ e1rm }: { e1rm: number }) {
   );
 }
 
-/** Done tick: a small carabiner, clasped, in place of the check. */
+/** A clasped carabiner: marks a set, and a whole exercise, as done. */
+function CarabinerGlyph({ color, size = 22 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={7} y={2.5} width={10} height={19} rx={5} stroke={color} strokeWidth={2.2} />
+      <Line x1={17} y1={8.5} x2={17} y2={15.5} stroke={color} strokeWidth={4} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 function TickButton({ done, onPress, label }: { done: boolean; onPress: () => void; label: string }) {
   return (
     <TouchableOpacity onPress={onPress} style={[aCard.confirmBtn, done && aCard.confirmBtnDone]} accessibilityLabel={label}>
-      {done ? (
-        <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-          <Rect x={7} y={2.5} width={10} height={19} rx={5} stroke={Ink.bg} strokeWidth={2.2} />
-          <Line x1={17} y1={8.5} x2={17} y2={15.5} stroke={Ink.bg} strokeWidth={4} strokeLinecap="round" />
-        </Svg>
-      ) : (
-        <Text style={aCard.confirmBtnText}>✓</Text>
-      )}
+      {done ? <CarabinerGlyph color={Ink.bg} /> : <Text style={aCard.confirmBtnText}>✓</Text>}
     </TouchableOpacity>
   );
 }
+
+// How long the grid takes to settle after a card collapses.
+const SETTLE_MS = 350;
 
 function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1 | 0 {
   const cur = parseFloat(currentWeight);
@@ -148,9 +152,12 @@ export function ExerciseCard({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fieldRefs = useRef<(TextInput | null)[]>([]);
 
-  // The lock haptic lands when the carabiner closes, so it waits on timers that must not outlive the tick.
+  // Finishing an exercise chains its collapsed card shut. The timers (measure, then the closing buzz)
+  // must not outlive the card staying collapsed, so they are cleared on reopen, reorder and unmount.
   const lockTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const rowRefs = useRef<(ComponentRef<typeof View> | null)[]>([]);
+  const cardRef = useRef<any>(null);
+  const finishedByRate = useRef(false);
+  const wasCollapsed = useRef(false);
   const clearLockTimers = () => {
     lockTimers.current.forEach(clearTimeout);
     lockTimers.current = [];
@@ -168,13 +175,30 @@ export function ExerciseCard({
   useEffect(() => {
     fieldRefs.current.length = exercise.sets.length * 2;
     swipeRefs.current.length = exercise.sets.length;
-    rowRefs.current.length = exercise.sets.length;
   });
 
   const allDone = exercise.sets.length > 0 && exercise.sets.every(s => s.done);
   // Stay open while the effort row is up, or the last set's RPE prompt never shows.
   const collapsed = !!compact || (open === null ? allDone && rateOpen === null : !open);
   const doneSummary = exercise.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ');
+
+  // The card just collapsed because its last set was rated: once it has settled, chain it shut.
+  const lockNow = collapsed && allDone && !compact;
+  useEffect(() => {
+    const justCollapsed = collapsed && !wasCollapsed.current;
+    wasCollapsed.current = collapsed;
+    if (!justCollapsed || !lockNow || !finishedByRate.current) return;
+    finishedByRate.current = false;
+    // The grid animates the height change, so wait for it before measuring the card.
+    lockTimers.current.push(setTimeout(() => {
+      cardRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
+        if (w <= 0 || h <= 0) return;
+        fireLock({ x, y, w, h });
+        lockTimers.current.push(setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), LOCK_MS));
+      });
+    }, SETTLE_MS));
+    return clearLockTimers;
+  }, [collapsed, lockNow]);
 
   // Props for each numeric field: registers it so Next can hop to the following one.
   let slot = 0;
@@ -296,28 +320,10 @@ export function ExerciseCard({
     onChange({ ...exercise, sets });
   }
 
-  /** Chain the row shut, and land the haptic as the carabiner closes. A PR gets its two-beat pulse instead. */
-  function lockSet(si: number, isPr: boolean) {
-    clearLockTimers();
-    const buzz = (delay: number) => {
-      lockTimers.current.push(setTimeout(() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-        if (isPr) lockTimers.current.push(setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 130));
-      }, delay));
-    };
-    const row = rowRefs.current[si];
-    if (!row) { buzz(0); return; }
-    row.measureInWindow((x, y, w, h) => {
-      if (w > 0 && h > 0) fireLock({ x, y, w, h });
-      buzz(w > 0 && h > 0 ? CLAMP_MS : 0);
-    });
-  }
-
   function toggleDone(si: number) {
     if (exercise.sets[si].done) {
       // tick again to take it back
       onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false } : s) });
-      clearLockTimers();
       setRateOpen(null);
       if (pr?.si === si) setPr(null);
       return;
@@ -338,7 +344,6 @@ export function ExerciseCard({
     } else if (pr) {
       setPr(null);
     }
-    lockSet(si, isPr);
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
 
@@ -346,17 +351,18 @@ export function ExerciseCard({
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, rpe: s.rpe === value ? '' : value } : s);
     onChange({ ...exercise, sets });
     setRateOpen(null);
+    finishedByRate.current = open === null && sets.every(x => x.done); // only when the card collapses by itself
     onRateSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
   }
 
   if (collapsed) {
     return (
-      <TouchableOpacity style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
+      <TouchableOpacity ref={cardRef} style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
         <View style={{ flex: 1 }}>
           <Text style={aCard.collapsedName} numberOfLines={1}>{exercise.name}</Text>
           {doneSummary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{doneSummary}</Text> : null}
         </View>
-        {allDone ? <Text style={aCard.collapsedTick}>✓</Text> : null}
+        {allDone ? <CarabinerGlyph color={Ink.textDim} /> : null}
       </TouchableOpacity>
     );
   }
@@ -479,7 +485,7 @@ export function ExerciseCard({
               {lines.map((ln, li) => {
                 const last = li === lines.length - 1;
                 return (
-                  <View key={li} ref={last ? (r => { rowRefs.current[si] = r; }) : undefined} style={[aCard.setRow, li > 0 && { marginTop: 8 }]}>
+                  <View key={li} style={[aCard.setRow, li > 0 && { marginTop: 8 }]}>
                     <View style={aCard.setNumWrap}>
                       {li === 0 ? (
                         <Text style={[aCard.setNum, isDone && aCard.setNumConfirmed]}>
