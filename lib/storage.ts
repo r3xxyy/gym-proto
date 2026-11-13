@@ -9,6 +9,7 @@ export const PENDING_PATH       = FileSystem.documentDirectory + 'pendingSession
 export const ACTIVE_SESSION_PATH = FileSystem.documentDirectory + 'activeSession.json';
 export const GYM_PATH           = FileSystem.documentDirectory + 'gym.json';
 export const GYMS_PATH          = FileSystem.documentDirectory + 'gyms.json';
+export const HIDDEN_GYMS_PATH   = FileSystem.documentDirectory + 'hiddenGyms.json';
 export const EPOCH_PATH         = FileSystem.documentDirectory + 'epoch.json';
 
 export const DELOAD_PATH        = FileSystem.documentDirectory + 'deloadDismissed.json';

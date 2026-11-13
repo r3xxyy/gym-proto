@@ -1,4 +1,4 @@
-import type { HistoryEntry } from '../types';
+import type { Exercise, HistoryEntry } from '../types';
 import { parseDateLocal } from './format';
 
 // Returns the most recent history entry for a given workoutName.
@@ -30,6 +30,24 @@ export function getMostRecentSessionOtherGym(
   const matching = history.filter(h => h.workoutName === workoutName && h.gym && h.gym !== excludeGym);
   if (matching.length === 0) return null;
   return matching.reduce((a, b) => parseDateLocal(b.date) > parseDateLocal(a.date) ? b : a);
+}
+
+// Exercise list for a workout as it was last done at this exact venue, or null if there is no such session.
+// Targets come from the current plan when the same exercise is in it, so progression carries over.
+export function venueSessionTemplate(
+  workoutName: string,
+  plan: Omit<Exercise, 'sets'>[],
+  history: HistoryEntry[],
+  gym: string,
+): Omit<Exercise, 'sets'>[] | null {
+  if (!gym) return null;
+  const sameGym = history.filter(h => h.workoutName === workoutName && h.gym === gym && !h.isRestDay && h.exercises.length > 0);
+  if (sameGym.length === 0) return null;
+  const last = sameGym.reduce((a, b) => parseDateLocal(b.date) > parseDateLocal(a.date) ? b : a);
+  return last.exercises.map(({ sets: _sets, startedAt: _s, endedAt: _e, notes: _n, ...ex }) => ({
+    ...ex,
+    target: plan.find(p => p.name === ex.name)?.target ?? ex.target,
+  }));
 }
 
 export function getPrevSets(exName: string, workoutName: string, history: HistoryEntry[], gym?: string): { weight: string; reps: string }[] {

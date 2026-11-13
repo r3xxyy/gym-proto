@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
 import { create } from 'zustand';
 import { PlateBar } from '@/components/plate-bar';
 import { Ink } from '@/constants/theme';
@@ -75,6 +75,46 @@ function PrStrip({ e1rm }: { e1rm: number }) {
   );
 }
 
+/** Set tick: pops and sends out a ring when it flips to done. Skips the initial mount so restored sets stay still. */
+function TickButton({ done, onPress, label }: { done: boolean; onPress: () => void; label: string }) {
+  const scale = useSharedValue(1);
+  const ring = useSharedValue(0);
+  const seen = useRef(done);
+  useEffect(() => {
+    if (done === seen.current) return;
+    seen.current = done;
+    if (!done) return;
+    scale.set(withSequence(withTiming(0.82, { duration: 70 }), withSpring(1, { damping: 7, stiffness: 320 })));
+    ring.set(0);
+    ring.set(withTiming(1, { duration: 520, easing: Easing.out(Easing.cubic) }));
+  }, [done, scale, ring]);
+  const pop = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: (1 - ring.get()) * 0.7,
+    transform: [{ scale: 1 + ring.get() * 1.4 }],
+  }));
+  return (
+    <View style={aCard.tickWrap}>
+      <Animated.View pointerEvents="none" style={[aCard.tickRing, ringStyle]} />
+      <Animated.View style={pop}>
+        <TouchableOpacity onPress={onPress} style={[aCard.confirmBtn, done && aCard.confirmBtnDone]} accessibilityLabel={label}>
+          <Text style={[aCard.confirmBtnText, done && aCard.confirmBtnTextDone]}>✓</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
+/** One chrome sweep across a card as it locks into its compact row. */
+function LockSweep() {
+  const x = useSharedValue(-80);
+  useEffect(() => {
+    x.set(withTiming(420, { duration: 650, easing: Easing.out(Easing.quad) }));
+  }, [x]);
+  const sweep = useAnimatedStyle(() => ({ transform: [{ translateX: x.get() }, { skewX: '-20deg' }] }));
+  return <Animated.View pointerEvents="none" style={[aCard.lockSweep, sweep]} />;
+}
+
 function setDelta(currentWeight: string, prevWeight: string | undefined): 1 | -1 | 0 {
   const cur = parseFloat(currentWeight);
   const prev = parseFloat(prevWeight ?? '');
@@ -94,12 +134,12 @@ export function ExerciseCard({
   prevLabel,
   prevSets2,
   prevLabel2,
-  dragActive,
+  compact,
 }: {
   exercise: Exercise;
   onChange: (updated: Exercise) => void;
-  /** True while the card is being dragged; shows the compact row so it travels a short distance. */
-  dragActive?: boolean;
+  /** Reorder mode: every card shows its compact row so the list is short and stable while dragging. */
+  compact?: boolean;
   onSwap?: () => void;
   onRemove?: () => void;
   /** Called with the exercise up to and including the set that was just ticked. */
@@ -147,7 +187,7 @@ export function ExerciseCard({
 
   const allDone = exercise.sets.length > 0 && exercise.sets.every(s => s.done);
   // Stay open while the effort row is up, or the last set's RPE prompt never shows.
-  const collapsed = !!dragActive || (open === null ? allDone && rateOpen === null : !open);
+  const collapsed = !!compact || (open === null ? allDone && rateOpen === null : !open);
   const doneSummary = exercise.sets.filter(s => s.weight && s.reps).map(s => `${s.weight}×${s.reps}`).join('  ');
 
   // Props for each numeric field: registers it so Next can hop to the following one.
@@ -315,12 +355,13 @@ export function ExerciseCard({
 
   if (collapsed) {
     return (
-      <TouchableOpacity style={aCard.collapsed} onPress={() => setOpen(true)} activeOpacity={0.7}>
+      <TouchableOpacity style={[aCard.collapsed, { overflow: 'hidden' }]} onPress={() => setOpen(true)} activeOpacity={0.7}>
+        {allDone && !compact && <LockSweep />}
         <View style={{ flex: 1 }}>
           <Text style={aCard.collapsedName} numberOfLines={1}>{exercise.name}</Text>
           {doneSummary ? <Text style={aCard.collapsedSets} numberOfLines={1}>{doneSummary}</Text> : null}
         </View>
-        <Text style={aCard.collapsedTick}>✓</Text>
+        {allDone ? <Animated.Text entering={ZoomIn.springify().damping(8)} style={aCard.collapsedTick}>✓</Animated.Text> : null}
       </TouchableOpacity>
     );
   }
@@ -473,13 +514,11 @@ export function ExerciseCard({
                       {...field(si, li, 'reps')}
                     />
                     {last ? (
-                      <TouchableOpacity
+                      <TickButton
+                        done={!!isDone}
                         onPress={() => toggleDone(si)}
-                        style={[aCard.confirmBtn, isDone && aCard.confirmBtnDone]}
-                        accessibilityLabel={isDone ? `Set ${si + 1} done, tap to undo` : `Finish set ${si + 1}`}
-                      >
-                        <Text style={[aCard.confirmBtnText, isDone && aCard.confirmBtnTextDone]}>✓</Text>
-                      </TouchableOpacity>
+                        label={isDone ? `Set ${si + 1} done, tap to undo` : `Finish set ${si + 1}`}
+                      />
                     ) : (
                       <View style={{ width: 48 }} />
                     )}
@@ -625,6 +664,9 @@ const aCard = StyleSheet.create({
   collapsed: { flexDirection: 'row', alignItems: 'center', backgroundColor: Ink.raised, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 12, gap: 12 },
   collapsedName: { fontFamily: 'Unbounded_500Medium', fontSize: 14, color: Ink.textDim },
   collapsedSets: { fontSize: 13, color: Ink.textFaint, marginTop: 3, fontVariant: ['tabular-nums'] },
+  tickWrap: { alignItems: 'center', justifyContent: 'center' },
+  tickRing: { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: Ink.text },
+  lockSweep: { position: 'absolute', top: 0, bottom: 0, width: 40, backgroundColor: 'rgba(255,255,255,0.12)' },
   collapsedTick: { fontSize: 18, color: Ink.text },
   // Plate calculator
   plateCalc: { backgroundColor: Ink.bg, borderRadius: 12, padding: 12, marginTop: 12 },

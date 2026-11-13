@@ -33,13 +33,13 @@ import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
 import { setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
 import { formatTime, nowMs, parseDateLocal, shortDate, shortGym } from '@/lib/format';
-import { FREE_WEIGHT_EXERCISES, getLastSessionColor, getMostRecentSession, getPrevSessionInfo } from '@/lib/history-lookup';
+import { FREE_WEIGHT_EXERCISES, getLastSessionColor, getMostRecentSession, getPrevSessionInfo, venueSessionTemplate } from '@/lib/history-lookup';
 import type { PrevRef } from '@/lib/history-lookup';
 import { deriveTargets } from '@/lib/progression';
 import { personalRecords } from '@/lib/progress';
 import { getRestDuration, isHeavySet } from '@/lib/rest';
 import { RESTORED_SESSIONS } from '@/lib/seed-history';
-import { ACTIVE_SESSION_PATH, BADGES_PATH, BW_PATH, EPOCH_PATH, GYM_PATH, GYMS_PATH, HISTORY_PATH, PENDING_PATH, WEEK_PLAN_PATH } from '@/lib/storage';
+import { ACTIVE_SESSION_PATH, BADGES_PATH, BW_PATH, EPOCH_PATH, GYM_PATH, GYMS_PATH, HIDDEN_GYMS_PATH, HISTORY_PATH, PENDING_PATH, WEEK_PLAN_PATH } from '@/lib/storage';
 import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
@@ -56,10 +56,6 @@ Notifications.setNotificationHandler({
   }),
 });
 
-
-function getTodayWorkout() {
-  return SPLIT[new Date().getDay()];
-}
 
 // Pre-fill sets from venue-appropriate history. Falls back to target structure (empty weight) if no history.
 function initSetsFromHistory(
@@ -149,7 +145,7 @@ export default function HomeScreen() {
   const [restHeavy, setRestHeavy] = useState(false); // last set was a near-max compound: rest was extended
   const [bodyweight, setBodyweight] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [dragging, setDragging] = useState(false);
+  const [reorder, setReorder] = useState(false);
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const [programEpoch, setProgramEpoch] = useState(PROGRAM_EPOCH);
   const currentWeek = getCurrentProgramWeek(programEpoch);
@@ -157,10 +153,7 @@ export default function HomeScreen() {
     const exs = getWeekExercises(currentWeek);
     return { 1: [...exs[1]], 2: [...exs[2]], 3: [...exs[3]], 4: [...exs[4]], 5: [...exs[5]] };
   });
-  const [expandedDay, setExpandedDay] = useState<number | null>(() => {
-    const d = new Date().getDay();
-    return d >= 1 && d <= 5 ? d : 1;
-  });
+  const [expandedDay, setExpandedDay] = useState<number | null>(1);
   const [swapContext, setSwapContext] = useState<{ day: number; exerciseId: string | null } | null>(null);
   const [activeSwapId, setActiveSwapId] = useState<string | null>(null); // '__add__' = add mode
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -168,6 +161,7 @@ export default function HomeScreen() {
   const bestE1RMByName: Record<string, number> = Object.fromEntries(personalRecords(history).map(p => [p.name, p.e1rm]));
   const [activeGym, setActiveGym] = useState<string>('');
   const [savedGyms, setSavedGyms] = useState<string[]>([]);
+  const [hiddenGyms, setHiddenGyms] = useState<string[]>(['AF Stratford']);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [newBadgeQueue, setNewBadgeQueue] = useState<BadgeDefinition[]>([]);
@@ -194,16 +188,47 @@ export default function HomeScreen() {
   const activeAccRef = useRef<number>(0);     // accumulated active seconds before current period
   const restStartRef = useRef<number>(0);     // timestamp when current rest period began
   const restAccRef = useRef<number>(0);       // accumulated rest seconds before current period
-  const todayWorkout = getTodayWorkout();
-  const knownGyms = [...new Set([...savedGyms, activeGym, ...history.map(h => h.gym)].filter((g): g is string => !!g))];
+  // The workout is whatever was picked on the lineup, not whatever weekday it is.
+  const sessionWorkout = selectedDay !== null ? SPLIT[selectedDay] : '';
+  const knownGyms = [...new Set([...savedGyms, activeGym, ...history.map(h => h.gym)].filter((g): g is string => !!g && !hiddenGyms.includes(g)))];
   function saveGymList(list: string[]) {
     setSavedGyms(list);
     FileSystem.writeAsStringAsync(GYMS_PATH, JSON.stringify(list)).catch(() => {});
   }
+  // Load the exercise list from the last time this workout was done at `gym`, if there was one.
+  function syncPlanToVenue(day: number, gym: string) {
+    const tpl = venueSessionTemplate(SPLIT[day], weekPlan[day] ?? [], history, gym);
+    if (tpl) setWeekPlan(prev => ({ ...prev, [day]: tpl }));
+  }
+
   function selectGym(gym: string) {
     setActiveGym(gym);
     FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify(gym)).catch(() => {});
     if (!savedGyms.includes(gym)) saveGymList([...savedGyms, gym]);
+    if (selectedDay !== null && !completedDays.includes(selectedDay)) syncPlanToVenue(selectedDay, gym);
+  }
+
+  function pickDay(day: number) {
+    setSelectedDay(day);
+    if (!completedDays.includes(day)) syncPlanToVenue(day, activeGym);
+  }
+
+  function hideGym(gym: string) {
+    const next = [...new Set([...hiddenGyms, gym])];
+    setHiddenGyms(next);
+    FileSystem.writeAsStringAsync(HIDDEN_GYMS_PATH, JSON.stringify(next)).catch(() => {});
+    if (activeGym === gym) {
+      setActiveGym('');
+      FileSystem.writeAsStringAsync(GYM_PATH, JSON.stringify('')).catch(() => {});
+    }
+  }
+
+  function gymMenu(gym: string) {
+    Alert.alert(gym, undefined, [
+      { text: 'Rename', onPress: () => Alert.prompt('Rename Gym', `Rename "${gym}" to:`, (val) => { if (val) renameGym(gym, val); }, 'plain-text', gym) },
+      { text: 'Remove venue', style: 'destructive', onPress: () => hideGym(gym) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   }
 
   function renameGym(oldName: string, newName: string) {
@@ -301,6 +326,7 @@ export default function HomeScreen() {
     if (hapticTimer.current) clearTimeout(hapticTimer.current);
     cancelRestNotifications();
     restAccRef.current += Math.round((Date.now() - restStartRef.current) / 1000);
+    restStartRef.current = Date.now(); // a repeat call must add 0, not the same span twice
     if (restInterval.current) clearInterval(restInterval.current);
     setCurrentRestSecs(0);
     setCurrentRestDuration(0);
@@ -317,6 +343,7 @@ export default function HomeScreen() {
       if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
       if (hapticTimer.current) clearTimeout(hapticTimer.current);
       activeAccRef.current += Math.round((Date.now() - activeStartRef.current) / 1000);
+      activeStartRef.current = Date.now();
       if (workoutInterval.current) clearInterval(workoutInterval.current);
       setCurrentRestSecs(0);
       setCurrentRestDuration(0);
@@ -360,9 +387,11 @@ export default function HomeScreen() {
 
     if (paused) {
       restAccRef.current += Math.round((Date.now() - restStartRef.current) / 1000);
+      restStartRef.current = Date.now();
       if (restInterval.current) clearInterval(restInterval.current);
     } else {
       activeAccRef.current += Math.round((Date.now() - activeStartRef.current) / 1000);
+      activeStartRef.current = Date.now();
       if (workoutInterval.current) clearInterval(workoutInterval.current);
       setPaused(true);
     }
@@ -419,12 +448,12 @@ export default function HomeScreen() {
   }
 
   function renderExercise({ item: ex }: { item: Exercise }) {
-    const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, todayWorkout, history, activeGym);
+    const { primary: pi, secondary: si } = getPrevSessionInfo(ex.name, sessionWorkout, history, activeGym);
     const mkLabel = (r: PrevRef) => r.crossGym && r.gym ? `↗ ${shortGym(r.gym)} · ${shortDate(r.date)}` : shortDate(r.date);
     return (
       <ExerciseCard
         exercise={ex}
-        dragActive={dragging}
+        compact={reorder}
         onChange={updated =>
           setExercises(prev => prev.map(e => (e.id === updated.id ? updated : e)))
         }
@@ -468,7 +497,7 @@ export default function HomeScreen() {
     const entry: HistoryEntry = {
       id: pendingEntry?.id ?? Date.now().toString(),
       date: pendingEntry?.date ?? new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-      workoutName: selectedDay !== null ? SPLIT[selectedDay] : todayWorkout,
+      workoutName: sessionWorkout,
       duration: finalActive,
       restTime: finalRest_,
       exercises: finished,
@@ -550,14 +579,19 @@ export default function HomeScreen() {
   }
 
   function reset() {
-    FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
-    FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
+    const dropBackups = () => {
+      FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
+      FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
+    };
     let updatedHistory = history;
     if (pendingEntry) {
       updatedHistory = [pendingEntry, ...history];
       setHistory(updatedHistory);
-      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updatedHistory)).catch(() => {});
+      // Backups go only after history is on disk, so a kill mid-write can't lose the session.
+      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updatedHistory)).then(dropBackups, () => {});
       setPendingEntry(null);
+    } else {
+      dropBackups();
     }
     const newly = checkNewBadges(updatedHistory, unlockedBadges);
     if (newly.length > 0) {
@@ -736,6 +770,11 @@ export default function HomeScreen() {
         const list = JSON.parse(await FileSystem.readAsStringAsync(GYMS_PATH));
         if (Array.isArray(list)) setSavedGyms(list.filter((g): g is string => typeof g === 'string' && !!g));
       }
+      const hiddenInfo = await FileSystem.getInfoAsync(HIDDEN_GYMS_PATH);
+      if (hiddenInfo.exists) {
+        const list = JSON.parse(await FileSystem.readAsStringAsync(HIDDEN_GYMS_PATH));
+        if (Array.isArray(list)) setHiddenGyms(list.filter((g): g is string => typeof g === 'string' && !!g));
+      }
       const gymInfo = await FileSystem.getInfoAsync(GYM_PATH);
       if (gymInfo.exists) {
         const raw = await FileSystem.readAsStringAsync(GYM_PATH);
@@ -859,7 +898,7 @@ export default function HomeScreen() {
                     key={gym}
                     style={[poster.venueChip, activeGym === gym && poster.venueChipActive]}
                     onPress={() => selectGym(gym)}
-                    onLongPress={() => Alert.prompt('Rename Gym', `Rename "${gym}" to:`, (val) => { if (val) renameGym(gym, val); }, 'plain-text', gym)}
+                    onLongPress={() => gymMenu(gym)}
                   >
                     <Text style={[poster.venueChipText, activeGym === gym && poster.venueChipTextActive]}>
                       {shortGym(gym)}
@@ -900,7 +939,7 @@ export default function HomeScreen() {
                             done={done}
                             isRest={isRest}
                             last={i === WEEK_DAYS.length - 1}
-                            onSelect={() => setSelectedDay(day)}
+                            onSelect={() => pickDay(day)}
                             onRest={() => logRestDay(day)}
                             onUndoRest={() => undoRestDay(day)}
                           />
@@ -1057,7 +1096,7 @@ export default function HomeScreen() {
                             done={done}
                             isRest={isRest}
                             last={i === supportDays.length - 1}
-                            onSelect={() => setSelectedDay(day)}
+                            onSelect={() => pickDay(day)}
                             onRest={() => logRestDay(day)}
                             onUndoRest={() => undoRestDay(day)}
                           />
@@ -1122,7 +1161,8 @@ export default function HomeScreen() {
           <View style={styles.timerBar}>
             <View style={styles.timerTop}>
               <TouchableOpacity onLongPress={resetClock} delayLongPress={600} activeOpacity={1} style={{ flex: 1 }}>
-                <Text style={styles.timerBarTitle} numberOfLines={1}>{SPLIT_LABEL[WORKOUT_TO_DAY[todayWorkout]] ?? todayWorkout}</Text>
+                <Text style={styles.timerBarTitle} numberOfLines={1}>{selectedDay !== null ? SPLIT_LABEL[selectedDay] : ''}</Text>
+                {!!activeGym && <Text style={poster.venueLabel}>{shortGym(activeGym)}</Text>}
                 <SessionClock />
               </TouchableOpacity>
               <TouchableOpacity style={poster.histBtn} onPress={() => { prevScreenRef.current = 'active'; setScreen('history'); }}>
@@ -1165,50 +1205,26 @@ export default function HomeScreen() {
               </View>
             )}
           </View>
-          {/* ── Venue row — reactive: changing gym updates all prev refs inline ── */}
-          <View style={[poster.venueRow, { paddingHorizontal: 16 }]}>
-            <Text style={poster.venueLabel}>Venue</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {knownGyms.map(gym => (
-                  <TouchableOpacity
-                    key={gym}
-                    style={[poster.venueChip, activeGym === gym && poster.venueChipActive]}
-                    onPress={() => selectGym(gym)}
-                    onLongPress={() => Alert.prompt('Rename Gym', `Rename "${gym}" to:`, (val) => { if (val) renameGym(gym, val); }, 'plain-text', gym)}
-                  >
-                    <Text style={[poster.venueChipText, activeGym === gym && poster.venueChipTextActive]}>
-                      {shortGym(gym)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                <TouchableOpacity
-                  style={poster.venueChip}
-                  onPress={() => Alert.prompt('New Venue', 'Enter gym name', (val) => {
-                    if (val?.trim()) selectGym(val.trim());
-                  })}
-                >
-                  <Text style={poster.venueChipText}>+ New</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            {exercises.length > 1 && (
+              <TouchableOpacity style={styles.reorderBtn} onPress={() => setReorder(r => !r)} hitSlop={8}>
+                <Text style={styles.reorderBtnText}>{reorder ? 'Done' : 'Reorder'}</Text>
+              </TouchableOpacity>
+            )}
             <Sortable.Grid
               columns={1}
               data={exercises}
               keyExtractor={ex => ex.id}
               renderItem={renderExercise}
               scrollableRef={scrollRef}
-              dragActivationDelay={350}
+              sortEnabled={reorder}
+              dragActivationDelay={120}
               activeItemScale={1.03}
               dropAnimationDuration={200}
               dimensionsAnimationType="worklet"
               hapticsEnabled
-              onDragStart={() => setDragging(true)}
-              onDragEnd={({ data }) => { setDragging(false); setExercises(data); }}
+              onDragEnd={({ data }) => setExercises(data)}
             />
             <TouchableOpacity style={styles.addExBtn} onPress={() => setActiveSwapId('__add__')}>
               <Text style={styles.addExBtnText}>+ Add exercise</Text>
@@ -1262,7 +1278,7 @@ export default function HomeScreen() {
           onDone={reset}
           onCoach={() => {
             const date = pendingEntry?.date ?? new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-            Share.share({ message: formatSessionForCoach(pendingEntry?.workoutName ?? todayWorkout, date, finalSeconds, finalRest, exercises, bodyweight, history, activeGym || undefined, programEpoch) });
+            Share.share({ message: formatSessionForCoach(pendingEntry?.workoutName ?? sessionWorkout, date, finalSeconds, finalRest, exercises, bodyweight, history, activeGym || undefined, programEpoch) });
           }}
           onContinue={continueWorkout}
         />
@@ -1342,6 +1358,8 @@ const styles = StyleSheet.create({
   continueBtnText: { fontSize: 14, fontWeight: '700', color: Ink.bg },
   numpadBar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: Ink.raised, borderTopWidth: 1, borderTopColor: Ink.line },
   numpadBtn: { fontSize: 17, fontWeight: '600', color: Ink.text },
+  reorderBtn: { alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 12, marginBottom: 8, borderWidth: 1, borderColor: Ink.line, borderRadius: 999 },
+  reorderBtnText: { fontSize: 13, color: Ink.textDim, ...Legible },
   endBtn: { backgroundColor: Ink.text, paddingVertical: 16, borderRadius: 999, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
   endBtnText: { fontSize: 15, fontWeight: '700', color: Ink.bg, textAlign: 'center' },
   addExBtn: { borderWidth: 1, borderColor: Ink.line, paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch', alignItems: 'center', marginBottom: 8 },
