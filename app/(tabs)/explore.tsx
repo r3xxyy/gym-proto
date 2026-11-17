@@ -1,8 +1,8 @@
 import { Ink } from '@/constants/theme';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView, type BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
-import { useFocusEffect } from 'expo-router';
-import { Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { HistoryEntry, UnlockedBadge } from '../../types';
 import { ALL_BADGES } from '../../constants/badges';
@@ -13,7 +13,7 @@ import { parseDateLocal } from '@/lib/format';
 import { countedSets, exerciseSeries, personalRecords } from '@/lib/progress';
 import type { PersonalRecord } from '@/lib/progress';
 import { sessionVolume } from '@/lib/session-stats';
-import { formatWeekForCoach } from '@/lib/coach-text';
+import { requestCoach } from '@/lib/coach-request';
 import { deloadHint } from '@/lib/deload';
 import { BADGES_PATH, DELOAD_PATH, EPOCH_PATH, HISTORY_PATH } from '@/lib/storage';
 
@@ -209,6 +209,7 @@ export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoc
   deloadDismissedWeek?: number;
   onDismissDeload?: (week: number) => void;
 }) {
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selectedBadge, setSelectedBadge] = useState<BadgeDefinition | null>(null);
   const [trendFor, setTrendFor] = useState<PersonalRecord | null>(null);
@@ -391,7 +392,7 @@ export function ProgressView({ history, unlockedBadges, programEpoch, onEditEpoc
       )}
 
       {/* ── Coach This Week ── */}
-      <TouchableOpacity style={s.coachBtn} onPress={() => Share.share({ message: formatWeekForCoach(weekEntries) })}>
+      <TouchableOpacity style={s.coachBtn} onPress={() => { requestCoach({ mode: 'week' }); router.navigate('/'); }}>
         <Text style={s.coachBtnText}>Coach this week</Text>
       </TouchableOpacity>
 

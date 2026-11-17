@@ -41,6 +41,7 @@ import { CoachScreen } from '@/components/coach-screen';
 import { NoteCard } from '@/components/note-card';
 import { BriefCard } from '@/components/brief-card';
 import { loadCoachLog, rpeBias, useCoachLog } from '@/lib/coach-log';
+import { clearCoachRequest, useCoachRequest } from '@/lib/coach-request';
 import { rpe8Guide } from '@/lib/rpe-load';
 import { markRestEnd, resetTicks, setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
 import { formatTime, nowMs, parseDateLocal, shortDate, shortGym } from '@/lib/format';
@@ -632,6 +633,14 @@ export default function HomeScreen() {
   // mistake the older rest-timer functions for render-time code.
   const openCoachRef = useRef<typeof openCoach | null>(null);
   useEffect(() => { openCoachRef.current = openCoach; });
+
+  // A request from another tab (the Progress tab's week button) opens the coach here.
+  const coachRequest = useCoachRequest(s => s.request);
+  useEffect(() => {
+    if (!coachRequest) return;
+    clearCoachRequest();
+    openCoachRef.current?.(coachRequest);
+  }, [coachRequest]);
 
   function leaveCoach() {
     noteRun.current++;
@@ -1468,10 +1477,6 @@ export default function HomeScreen() {
             FileSystem.writeAsStringAsync(BW_PATH, JSON.stringify(v)).catch(() => {});
           }}
           onDone={reset}
-          onCoach={() => {
-            const date = pendingEntry?.date ?? new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-            Share.share({ message: formatSessionForCoach(pendingEntry?.workoutName ?? sessionWorkout, date, finalSeconds, finalRest, exercises, bodyweight, history, activeGym || undefined, programEpoch) });
-          }}
           onContinue={continueWorkout}
           brief={pendingEntry?.brief}
           briefStatus={briefStatus}

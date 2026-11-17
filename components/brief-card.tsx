@@ -27,7 +27,7 @@ export function BriefCard({ title, status, brief, onRetry }: Props) {
 
       {status === 'failed' && (
         <View>
-          <Text style={s.dim}>Couldn&apos;t reach the coach. Check your connection and try again, or use Coach this session below.</Text>
+          <Text style={s.dim}>Couldn&apos;t reach the coach. Check your connection and try again.</Text>
           <TouchableOpacity style={s.retry} onPress={onRetry}><Text style={s.retryText}>Try again</Text></TouchableOpacity>
         </View>
       )}

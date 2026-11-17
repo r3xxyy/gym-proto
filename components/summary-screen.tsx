@@ -17,7 +17,6 @@ type Props = {
   bodyweight: string;
   onBodyweightChange: (value: string) => void;
   onDone: () => void;
-  onCoach: () => void;
   onContinue: () => void;
   /** The coach's read of the session; 'none' hides the card (nothing logged to coach). */
   brief?: SessionBrief;
@@ -33,7 +32,7 @@ type Props = {
 };
 
 /** The screen shown after Finish workout: totals, a bodyweight field for the kcal estimate, and next steps. */
-export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onCoach, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel, chat, asking, askFailed, onAsk }: Props) {
+export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel, chat, asking, askFailed, onAsk }: Props) {
   return (
     <View style={{ flex: 1, backgroundColor: Ink.bg }}>
       <View style={sum2.header}>
@@ -118,9 +117,6 @@ export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, 
 
         <TouchableOpacity style={sum2.primary} onPress={onDone}>
           <Text style={sum2.primaryText}>Done</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={sum2.secondary} onPress={onCoach}>
-          <Text style={sum2.secondaryText}>Coach this session</Text>
         </TouchableOpacity>
         <TouchableOpacity style={sum2.secondary} onPress={onContinue}>
           <Text style={sum2.secondaryText}>Keep going</Text>
