@@ -13,3 +13,4 @@ export const HIDDEN_GYMS_PATH   = FileSystem.documentDirectory + 'hiddenGyms.jso
 export const EPOCH_PATH         = FileSystem.documentDirectory + 'epoch.json';
 
 export const DELOAD_PATH        = FileSystem.documentDirectory + 'deloadDismissed.json';
+export const COACH_PATH        = FileSystem.documentDirectory + 'coachLog.json';

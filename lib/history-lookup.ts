@@ -58,7 +58,7 @@ export function getPrevSets(exName: string, workoutName: string, history: Histor
   return prevEx?.sets.map(s => ({ weight: s.weight, reps: s.reps })) ?? [];
 }
 
-export type PrevRef = { sets: { weight: string; reps: string }[]; gym?: string; date: string; crossGym: boolean };
+export type PrevRef = { sets: { weight: string; reps: string; rpe?: string }[]; gym?: string; date: string; crossGym: boolean };
 
 export function getPrevSessionInfo(
   exName: string,
@@ -72,7 +72,7 @@ export function getPrevSessionInfo(
   const { entry: p, crossGym: pCross } = getMostRecentSession(workoutName, history, isFree ? undefined : activeGym);
   const pEx = p?.exercises.find(e => e.name === exName);
   const primary: PrevRef | null = pEx?.sets.some(s => s.weight)
-    ? { sets: pEx.sets.map(s => ({ weight: s.weight, reps: s.reps })), gym: p?.gym, date: p!.date, crossGym: isFree ? false : pCross }
+    ? { sets: pEx.sets.map(s => ({ weight: s.weight, reps: s.reps, rpe: s.rpe })), gym: p?.gym, date: p!.date, crossGym: isFree ? false : pCross }
     : null;
 
   // Secondary: last at a DIFFERENT venue — only for machine/cable at a known venue

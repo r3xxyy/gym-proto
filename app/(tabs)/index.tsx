@@ -34,7 +34,10 @@ import { fadeAllLocks, getCard, requestOpen } from '@/lib/lock-store';
 import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
-import { setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
+import { generateBrief } from '@/lib/brief';
+import { loadCoachLog, rpeBias, useCoachLog } from '@/lib/coach-log';
+import { rpe8Guide } from '@/lib/rpe-load';
+import { markRestEnd, resetTicks, setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
 import { formatTime, nowMs, parseDateLocal, shortDate, shortGym } from '@/lib/format';
 import { FREE_WEIGHT_EXERCISES, getLastSessionColor, getMostRecentSession, getPrevSessionInfo, venueSessionTemplate } from '@/lib/history-lookup';
 import type { PrevRef } from '@/lib/history-lookup';
@@ -189,11 +192,15 @@ export default function HomeScreen() {
   const [savedGyms, setSavedGyms] = useState<string[]>([]);
   const [hiddenGyms, setHiddenGyms] = useState<string[]>(['AF Stratford']);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
+  const [briefStatus, setBriefStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
+  const briefRun = useRef(0); // bumped to drop a reply that arrives after the session moved on
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [newBadgeQueue, setNewBadgeQueue] = useState<BadgeDefinition[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [weekPlanLoaded, setWeekPlanLoaded] = useState(false);
   const { start: cwStart, end: cwEnd } = getCurrentWeekBounds(programEpoch);
+  const coachNudges = useCoachLog(s => s.nudges);
+  const rpeAdjust = rpeBias(coachNudges)?.bias ?? 0;
   const thisWeekHistory = history.filter(h => {
     const ts = parseDateLocal(h.date);
     return ts >= cwStart && ts < cwEnd;
@@ -330,6 +337,7 @@ export default function HomeScreen() {
     activeStartRef.current = Date.now();
     sessionStartRef.current = Date.now();
     restAccRef.current = 0;
+    resetTicks();
     const wName = SPLIT[selectedDay];
     setExercises(plan.map(e => ({ ...e, sets: initSetsFromHistory(e.name, wName, history, activeGym, e.target) })));
     setScreen('active');
@@ -353,6 +361,7 @@ export default function HomeScreen() {
     cancelRestNotifications();
     restAccRef.current += Math.round((Date.now() - restStartRef.current) / 1000);
     restStartRef.current = Date.now(); // a repeat call must add 0, not the same span twice
+    markRestEnd(Date.now());
     if (restInterval.current) clearInterval(restInterval.current);
     setCurrentRestSecs(0);
     setCurrentRestDuration(0);
@@ -502,7 +511,27 @@ export default function HomeScreen() {
     );
   }
 
+  /** Asks the coach for its read of a finished session; the result rides on the pending entry so Done saves it. */
+  function runBrief(entry: HistoryEntry) {
+    const run = ++briefRun.current;
+    if (!entry.exercises.some(ex => ex.sets.some(set => set.done && set.weight && set.reps))) { setBriefStatus('none'); return; }
+    setBriefStatus('loading');
+    generateBrief({
+      workout: entry.workoutName, date: entry.date, gym: entry.gym, exercises: entry.exercises, history,
+      epoch: programEpoch, programWeek: currentWeek, liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight,
+      feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
+    }).then(brief => {
+      if (run !== briefRun.current) return;
+      if (!brief) { setBriefStatus('failed'); return; }
+      const withBrief = { ...entry, brief };
+      setPendingEntry(cur => (cur && cur.id === entry.id ? withBrief : cur));
+      FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(withBrief)).catch(() => {});
+      setBriefStatus('ready');
+    });
+  }
+
   function endWorkout() {
+    resetTicks();
     // Compute final times from refs to avoid stale state
     const finalActive = paused
       ? activeAccRef.current
@@ -532,12 +561,15 @@ export default function HomeScreen() {
     setPendingEntry(entry);
     FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(entry)).catch(() => {});
     FileSystem.deleteAsync(ACTIVE_SESSION_PATH, { idempotent: true }).catch(() => {});
+    runBrief(entry);
     setFinalSeconds(finalActive);
     setFinalRest(finalRest_);
     setScreen('summary');
   }
 
   function continueWorkout() {
+    briefRun.current++;
+    setBriefStatus('none');
     FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
     // Restore accumulators from frozen values so timer picks up seamlessly
     activeAccRef.current = finalSeconds;
@@ -766,6 +798,7 @@ export default function HomeScreen() {
         setHistory([]);
         await FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify([]));
       }
+      loadCoachLog();
       const bwInfo = await FileSystem.getInfoAsync(BW_PATH);
       if (bwInfo.exists) {
         const raw = await FileSystem.readAsStringAsync(BW_PATH);
@@ -831,6 +864,8 @@ export default function HomeScreen() {
         setFinalSeconds(saved.duration);
         setFinalRest(saved.restTime);
         setExercises(saved.exercises);
+        // A brief that was still on its way when the app died is offered again via Try again.
+        setBriefStatus(saved.brief ? 'ready' : 'failed');
         setScreen('summary');
       } else {
         // Restore active session if app was killed mid-session (e.g. Expo Go logout)
@@ -844,6 +879,7 @@ export default function HomeScreen() {
           restAccRef.current = saved.restAcc;
           activeStartRef.current = Date.now();
           setExercises(saved.exercises);
+          resetTicks(Math.max(0, ...saved.exercises.flatMap((e: Exercise) => e.sets.map(x => x.doneAt ?? 0))));
           if (saved.bodyweight) setBodyweight(saved.bodyweight);
           if (saved.selectedDay != null) setSelectedDay(saved.selectedDay);
           setSeconds(saved.activeAcc);
@@ -1058,6 +1094,10 @@ export default function HomeScreen() {
                                     const targetColor = weightGreen ? '#34C759' : repsGreen ? '#FF3B30' : undefined;
                                     return (
                                       <>
+                                        {(() => {
+                                          const g = rpe8Guide(ex, SPLIT[headlineDay], history, activeGym || undefined, rpeAdjust);
+                                          return g ? <Text style={poster.lineupRpe8}>{`RPE 8 ≈ ${g.kg} kg × ${g.reps}`}</Text> : null;
+                                        })()}
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                           <TextInput
                                             value={main}
@@ -1153,17 +1193,6 @@ export default function HomeScreen() {
                 [swapContext.day]: swapContext.exerciseId === null
                   ? [...(prev[swapContext.day] ?? []), opt]
                   : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? opt : e),
-              }));
-              setSwapContext(null);
-            }}
-            onCustom={name => {
-              if (!swapContext) return;
-              const customEx: Omit<Exercise, 'sets'> = { id: `custom_${Date.now()}`, name, muscles: '', type: 'Iso', target: '', cue: '' };
-              setWeekPlan(prev => ({
-                ...prev,
-                [swapContext.day]: swapContext.exerciseId === null
-                  ? [...(prev[swapContext.day] ?? []), customEx]
-                  : (prev[swapContext.day] ?? []).map(e => e.id === swapContext.exerciseId ? customEx : e),
               }));
               setSwapContext(null);
             }}
@@ -1280,16 +1309,6 @@ export default function HomeScreen() {
               }
               setActiveSwapId(null);
             }}
-            onCustom={name => {
-              const id = activeSwapId;
-              const customEx: Exercise = { id: `custom_${Date.now()}`, name, muscles: '', type: 'Iso', target: '', cue: '', sets: [{ weight: '', reps: '', rpe: '', drops: [] }] };
-              if (id === '__add__') {
-                setExercises(prev => [...prev, customEx]);
-              } else {
-                setExercises(prev => prev.map(e => e.id === id ? { ...customEx, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e));
-              }
-              setActiveSwapId(null);
-            }}
             onClose={() => setActiveSwapId(null)}
           />
         </View>
@@ -1312,6 +1331,18 @@ export default function HomeScreen() {
             Share.share({ message: formatSessionForCoach(pendingEntry?.workoutName ?? sessionWorkout, date, finalSeconds, finalRest, exercises, bodyweight, history, activeGym || undefined, programEpoch) });
           }}
           onContinue={continueWorkout}
+          brief={pendingEntry?.brief}
+          briefStatus={briefStatus}
+          briefTitle={`SESSION ANALYSIS — ${pendingEntry?.workoutName ?? sessionWorkout} | Wk ${currentWeek}`}
+          onRetryBrief={() => pendingEntry && runBrief(pendingEntry)}
+          feel={pendingEntry?.feel}
+          onFeel={n => {
+            if (!pendingEntry) return;
+            const rated = { ...pendingEntry, feel: n, brief: undefined };
+            setPendingEntry(rated);
+            FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(rated)).catch(() => {});
+            runBrief(rated);
+          }}
         />
       )}
 
@@ -1424,6 +1455,7 @@ const poster = StyleSheet.create({
   lineupIdx: { fontSize: 12, color: Ink.textDim, fontVariant: ['tabular-nums'], width: 24, ...Legible },
   lineupName: { fontSize: 16, fontWeight: '700', color: Ink.text, letterSpacing: 0.3, ...Legible },
   lineupMuscle: { fontSize: 13, color: Ink.textDim, marginTop: 4, textTransform: 'capitalize', ...Legible },
+  lineupRpe8: { fontSize: 11, color: Ink.textFaint, textAlign: 'right', fontVariant: ['tabular-nums'], marginBottom: 2 },
   lineupWeight: { fontSize: 15, fontWeight: '600', color: Ink.textDim, fontVariant: ['tabular-nums'], ...Legible },
   lineupSets: { fontSize: 13, color: Ink.textDim, fontVariant: ['tabular-nums'], ...Legible },
   lineupRemove: { fontSize: 12, color: Ink.textFaint, marginTop: 6 },

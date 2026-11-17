@@ -3,8 +3,9 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { Ink } from '@/constants/theme';
 import { formatTime } from '@/lib/format';
 import { estimateNetKcal, sessionVolume } from '@/lib/session-stats';
+import { BriefCard } from './brief-card';
 import { NUMPAD_DONE_ID } from './exercise-card';
-import type { Exercise } from '../types';
+import type { Exercise, SessionBrief } from '../types';
 
 type Props = {
   exercises: Exercise[];
@@ -17,10 +18,17 @@ type Props = {
   onDone: () => void;
   onCoach: () => void;
   onContinue: () => void;
+  /** The coach's read of the session; 'none' hides the card (nothing logged to coach). */
+  brief?: SessionBrief;
+  briefStatus: 'none' | 'loading' | 'ready' | 'failed';
+  briefTitle: string;
+  onRetryBrief: () => void;
+  feel?: number;
+  onFeel: (n: number) => void;
 };
 
 /** The screen shown after Finish workout: totals, a bodyweight field for the kcal estimate, and next steps. */
-export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onCoach, onContinue }: Props) {
+export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onCoach, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel }: Props) {
   return (
     <View style={{ flex: 1, backgroundColor: Ink.bg }}>
       <View style={sum2.header}>
@@ -53,7 +61,27 @@ export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, 
           </View>
         </View>
 
-        <Text style={sum2.fieldLabel}>Bodyweight (kg), used for the kcal estimate</Text>
+        {briefStatus !== 'none' && (
+          <View style={{ marginTop: 24 }}>
+            <Text style={sum2.fieldLabel}>How did it feel? 1 rough · 5 great</Text>
+            <View style={fe.row}>
+              {[1, 2, 3, 4, 5].map(n => (
+                <TouchableOpacity
+                  key={n}
+                  style={[fe.chip, feel === n && fe.chipOn]}
+                  onPress={() => onFeel(n)}
+                  accessibilityLabel={`Felt ${n} out of 5`}>
+                  <Text style={[fe.chipText, feel === n && fe.chipTextOn]}>{n}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+        {briefStatus !== 'none' && (
+          <BriefCard title={briefTitle} status={briefStatus} brief={brief} onRetry={onRetryBrief} />
+        )}
+
+        <Text style={[sum2.fieldLabel, { marginTop: 24 }]}>Bodyweight (kg), used for the kcal estimate</Text>
         <TextInput
           style={sum2.field}
           value={bodyweight}
@@ -112,6 +140,14 @@ const sum2 = StyleSheet.create({
   primaryText: { fontSize: 17, fontWeight: '800', color: Ink.bg },
   secondary: { marginTop: 10, minHeight: 52, borderRadius: 26, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { fontSize: 15, fontWeight: '600', color: Ink.text },
+});
+
+const fe = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 8 },
+  chip: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
+  chipOn: { backgroundColor: Ink.text, borderColor: Ink.text },
+  chipText: { fontFamily: 'Unbounded_500Medium', fontSize: 16, color: Ink.text },
+  chipTextOn: { color: Ink.bg },
 });
 
 const summ = StyleSheet.create({

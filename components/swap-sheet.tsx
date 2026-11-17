@@ -4,25 +4,29 @@ import {
   BottomSheetBackdrop,
   BottomSheetModal,
   BottomSheetScrollView,
-  BottomSheetTextInput,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { resolveExercise } from '@/lib/exercise-ai';
+import { SheetTextInput } from '@/components/sheet-text-input';
 import { Ink } from '@/constants/theme';
 import type { Exercise } from '@/types';
 
 type Option = Omit<Exercise, 'sets'>;
 
-/** Gesture-driven sheet for swapping or adding an exercise; the search field rides above the keyboard. */
-export function SwapSheet({ open, title, options, onPick, onCustom, onClose }: {
+/**
+ * Gesture-driven sheet for swapping or adding an exercise; the search field rides above the keyboard.
+ * A typed name is resolved to a proper exercise (name, muscles, machine) before it is picked.
+ */
+export function SwapSheet({ open, title, options, onPick, onClose }: {
   open: boolean;
   title: string;
   options: Option[];
   onPick: (opt: Option) => void;
-  onCustom: (name: string) => void;
   onClose: () => void;
 }) {
   const ref = useRef<BottomSheetModal>(null);
   const [query, setQuery] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   useEffect(() => {
     if (open) ref.current?.present();
@@ -32,6 +36,14 @@ export function SwapSheet({ open, title, options, onPick, onCustom, onClose }: {
   const backdrop = useCallback((props: BottomSheetBackdropProps) => (
     <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} pressBehavior="close" />
   ), []);
+
+  async function pickCustom() {
+    if (resolving) return;
+    setResolving(true);
+    const opt = await resolveExercise(query.trim());
+    setResolving(false);
+    onPick(opt);
+  }
 
   const q = query.trim().toLowerCase();
   const shown = options.filter(o => !q || o.name.toLowerCase().includes(q) || o.muscles.toLowerCase().includes(q));
@@ -51,7 +63,7 @@ export function SwapSheet({ open, title, options, onPick, onCustom, onClose }: {
       onDismiss={() => { setQuery(''); onClose(); }}>
       <BottomSheetScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>{title}</Text>
-        <BottomSheetTextInput
+        <SheetTextInput
           style={s.search}
           value={query}
           onChangeText={setQuery}
@@ -60,9 +72,9 @@ export function SwapSheet({ open, title, options, onPick, onCustom, onClose }: {
           autoCorrect={false}
         />
         {q !== '' && !exact && (
-          <TouchableOpacity style={s.option} onPress={() => onCustom(query.trim())}>
+          <TouchableOpacity style={s.option} onPress={pickCustom} disabled={resolving}>
             <Text style={s.optName}>&quot;{query.trim()}&quot;</Text>
-            <Text style={s.optMuscles}>custom — tap to use</Text>
+            <Text style={s.optMuscles}>{resolving ? 'identifying…' : 'custom — tap to use'}</Text>
           </TouchableOpacity>
         )}
         {shown.map(opt => (

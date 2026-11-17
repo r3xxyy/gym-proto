@@ -9,6 +9,9 @@ import { Ink } from '@/constants/theme';
 import { consumeOpenRequest, registerCard, startStage, unregisterCard, useLockStore } from '@/lib/lock-store';
 import { nowMs } from '@/lib/format';
 import { estimate1RM } from '@/lib/progress';
+import { checkRpe, type RpeNudge } from '@/lib/rpe-check';
+import { markTick } from '@/lib/workout-store';
+import { recordNudge } from '@/lib/coach-log';
 import type { Exercise } from '../types';
 
 // ─── Exercise Card ────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ export function ExerciseCard({
   onRateSet?: (exercise: Exercise) => void;
   /** Best estimated 1RM logged for this exercise before today; undefined if it has never been logged. */
   bestE1RM?: number;
-  prevSets?: { weight: string; reps: string }[];
+  prevSets?: { weight: string; reps: string; rpe?: string }[];
   prevLabel?: string;
   prevSets2?: { weight: string; reps: string }[];
   prevLabel2?: string;
@@ -197,6 +200,36 @@ export function ExerciseCard({
   // Numpad chips fire from a closure made at focus time, so edits read the latest props through this ref.
   const latest = useRef({ exercise, onChange });
   useEffect(() => { latest.current = { exercise, onChange }; });
+
+  // Live RPE check: once a ticked set has an RPE, a cheap local gate may ask Gemini whether it looks right.
+  // A nudge is keyed by set index; `checked` remembers what was already looked at so re-renders don't refire,
+  // and `dismissed` holds the weight|reps a nudge was waved off at, so editing either brings it back.
+  const [nudges, setNudges] = useState<Record<number, RpeNudge & { forRpe: string }>>({});
+  const checked = useRef(new Map<number, string>());
+  const dismissed = useRef(new Map<number, string>());
+  const rpeSig = exercise.sets.map(x => (x.done && x.rpe ? `${x.weight}|${x.reps}|${x.rpe}` : '')).join(',');
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    exercise.sets.forEach((set, si) => {
+      const sig = set.done && set.rpe ? `${set.weight}|${set.reps}|${set.rpe}` : '';
+      if (!sig) { checked.current.delete(si); return; }
+      if (checked.current.get(si) === sig) return;
+      checked.current.delete(si);
+      timers.push(setTimeout(async () => {
+        if (dismissed.current.get(si) === `${set.weight}|${set.reps}`) return;
+        checked.current.set(si, sig);
+        const { exercise: ex } = readLatest(latest);
+        const nudge = await checkRpe({ exercise: ex, si, prevSets, bestE1RM: bestRef.current });
+        if (!nudge) return;
+        // Drop the answer if the set was changed, un-ticked or waved off while it was in flight.
+        const cur = readLatest(latest).exercise.sets[si];
+        if (!cur?.done || `${cur.weight}|${cur.reps}|${cur.rpe}` !== sig) return;
+        if (dismissed.current.get(si) === `${cur.weight}|${cur.reps}`) return;
+        setNudges(n => ({ ...n, [si]: { ...nudge, forRpe: cur.rpe ?? '' } }));
+      }, 600));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [rpeSig]);
 
   // Drop refs left by deleted sets so Next never hops to an unmounted field (two fields per set: weight, reps).
   useEffect(() => {
@@ -323,6 +356,8 @@ export function ExerciseCard({
     if (exercise.sets.length === 1) return;
     const removed = exercise.sets[si];
     onChange({ ...exercise, sets: exercise.sets.filter((_, i) => i !== si) });
+    // Nudges and their bookkeeping are keyed by set index, which just shifted.
+    setNudges({}); checked.current.clear(); dismissed.current.clear();
     setRateOpen(null);
     setUndo({ index: si, set: removed });
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -355,7 +390,7 @@ export function ExerciseCard({
   function toggleDone(si: number) {
     if (exercise.sets[si].done) {
       // tick again to take it back
-      onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false } : s) });
+      onChange({ ...exercise, sets: exercise.sets.map((s, i) => i === si ? { ...s, done: false, doneAt: undefined, restBefore: undefined, setSecs: undefined } : s) });
       setRateOpen(null);
       if (pr?.si === si) setPr(null);
       return;
@@ -365,7 +400,10 @@ export function ExerciseCard({
     const g = ghostFor(si, exercise);
     const sets = exercise.sets.map((s, i) => i === si ? { ...s, weight: s.weight || g.weight, reps: s.reps || g.reps, done: true } : s);
     const startedAt = !exercise.startedAt && sets[si].weight ? nowMs() : exercise.startedAt;
-    onChange({ ...exercise, sets, startedAt, endedAt: nowMs() });
+    const tickedAt = nowMs();
+    const timing = markTick(tickedAt, parseInt(sets[si].reps) || 0);
+    const timed = sets.map((s, i) => i === si ? { ...s, doneAt: tickedAt, restBefore: timing?.restSecs, setSecs: timing?.setSecs } : s);
+    onChange({ ...exercise, sets: timed, startedAt, endedAt: tickedAt });
     setRateOpen(si);
     // A new best estimated 1RM, once this exercise has a history to beat.
     const est = estimate1RM(parseFloat(sets[si].weight) || 0, parseInt(sets[si].reps) || 0);
@@ -377,6 +415,27 @@ export function ExerciseCard({
       setPr(null);
     }
     onConfirmSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
+  }
+
+  function logNudge(si: number, outcome: 'accepted' | 'dismissed') {
+    const n = nudges[si];
+    const logged = parseFloat(exercise.sets[si]?.rpe ?? '');
+    if (!n || isNaN(logged)) return;
+    recordNudge({ at: nowMs(), exercise: exercise.name, loggedRpe: logged, suggestedRpe: parseFloat(n.suggestedRpe), outcome });
+  }
+
+  function acceptNudge(si: number, value: string) {
+    logNudge(si, 'accepted');
+    const sets = exercise.sets.map((s, i) => i === si ? { ...s, rpe: value } : s);
+    dismissed.current.set(si, `${exercise.sets[si].weight}|${exercise.sets[si].reps}`);
+    onChange({ ...exercise, sets });
+    onRateSet?.({ ...exercise, sets: sets.slice(0, si + 1) });
+  }
+
+  function dismissNudge(si: number) {
+    logNudge(si, 'dismissed');
+    dismissed.current.set(si, `${exercise.sets[si].weight}|${exercise.sets[si].reps}`);
+    setNudges(n => { const { [si]: _gone, ...rest } = n; return rest; });
   }
 
   function rate(si: number, value: string) {
@@ -594,6 +653,16 @@ export function ExerciseCard({
                   <Text style={aCard.moreLink}>RPE {set.rpe}</Text>
                 </TouchableOpacity>
               ) : null}
+              {isDone && rateOpen !== si && nudges[si]?.forRpe === set.rpe && (
+                <View style={aCard.nudge}>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => acceptNudge(si, nudges[si].suggestedRpe)} accessibilityLabel={`Change to RPE ${nudges[si].suggestedRpe}`}>
+                    <Text style={aCard.nudgeText}>Feels more like RPE {nudges[si].suggestedRpe}{nudges[si].reason ? ` · ${nudges[si].reason}` : ''}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => dismissNudge(si)} hitSlop={{ top: 12, bottom: 12, left: 16, right: 12 }} accessibilityLabel="Dismiss">
+                    <Text style={aCard.nudgeX}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </Swipeable>
         );
@@ -688,6 +757,9 @@ const aCard = StyleSheet.create({
   rateChip: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: Ink.line, alignItems: 'center', justifyContent: 'center' },
   rateChipText: { fontSize: 14, fontWeight: '600', color: Ink.text },
   rateTag: { marginTop: 6, paddingLeft: 48 },
+  nudge: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, marginLeft: 48, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 10, backgroundColor: Ink.bg },
+  nudgeText: { fontSize: 13, color: Ink.text, fontVariant: ['tabular-nums'] },
+  nudgeX: { fontSize: 18, color: Ink.textDim, lineHeight: 20 },
   swipeDelete: { width: 72 },
   undoBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: Ink.bg, borderRadius: 10 },
   undoText: { fontSize: 14, color: Ink.textDim },

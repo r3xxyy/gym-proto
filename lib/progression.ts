@@ -17,7 +17,7 @@ export function parseRepRange(target: string): { lo: number; hi: number } | null
 }
 
 /** Smallest sensible jump: 2.5 kg, or 1 kg for light isolation work. */
-function increment(weight: number, type: Exercise['type']): number {
+export function increment(weight: number, type: Exercise['type']): number {
   return type === 'Iso' && weight < SMALL_WEIGHT_KG ? 1 : 2.5;
 }
 

@@ -9,6 +9,10 @@ export type WorkoutSet = {
   drops: Drop[];
   /** Ticked off during the session. Older history entries don't have it and count as done. */
   done?: boolean;
+  /** When it was ticked (ms); the seconds of rest before it; and, only when the rest timer marked the start, how long the set itself took. Absent on a session's first set and on older entries. */
+  doneAt?: number;
+  restBefore?: number;
+  setSecs?: number;
 };
 
 export type Exercise = {
@@ -24,6 +28,14 @@ export type Exercise = {
   endedAt?: number;
 };
 
+/** The in-app coach's read of a finished session; kept on the history entry so the next brief can refer back to it. */
+export type SessionBrief = {
+  generatedAt: number;
+  performance: { strong: string[]; flagged: string[] };
+  targets: { exercise: string; weightKg: number | null; sets: number; reps: string; rpeCap: number | null; note: string }[];
+  flags: { flag: string; reason: string; recommendation: string }[];
+};
+
 export type HistoryEntry = {
   id: string;
   date: string;
@@ -33,6 +45,9 @@ export type HistoryEntry = {
   exercises: Exercise[];
   isRestDay?: boolean;
   gym?: string;
+  brief?: SessionBrief;
+  /** How the session felt, 1 (rough) to 5 (great), tapped on the summary screen. */
+  feel?: number;
 };
 
 export type UnlockedBadge = {

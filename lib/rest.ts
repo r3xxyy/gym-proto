@@ -29,6 +29,24 @@ const REST_TIERS = {
   core:     [ 75,  90, 120] as const,
 };
 
+function restTier(exercise: Exercise): keyof typeof REST_TIERS {
+  const name    = exercise.name.toLowerCase();
+  const primary = exercise.muscles.split(',')[0].trim().toLowerCase();
+
+  if (CORE_MUSCLES.has(primary)) return 'core';
+  if (exercise.type === 'Iso') return ARM_MUSCLES.has(primary) ? 'arm' : 'iso';
+  // Compounds
+  if (primary === 'anterior delt')                                               return 'shoulder';
+  if (LEG_COMPOUND_MUSCLES.has(primary) && !name.includes('pull-through'))       return 'leg';
+  if (PUSH_MUSCLES.has(primary))                                                 return 'push';
+  return 'pull';
+}
+
+/** [floor, mid, ceil] rest in seconds for this exercise's tier. */
+export function restRange(exercise: Exercise): readonly [number, number, number] {
+  return REST_TIERS[restTier(exercise)];
+}
+
 export function getRestDuration(exercise: Exercise): number {
   const lastSet = exercise.sets[exercise.sets.length - 1];
   const rpe = parseFloat(lastSet?.rpe ?? '');
@@ -41,24 +59,7 @@ export function getRestDuration(exercise: Exercise): number {
     else band = 2;
   }
 
-  const name    = exercise.name.toLowerCase();
-  const primary = exercise.muscles.split(',')[0].trim().toLowerCase();
-
-  let tier: keyof typeof REST_TIERS;
-
-  if (CORE_MUSCLES.has(primary)) {
-    tier = 'core';
-  } else if (exercise.type === 'Iso') {
-    tier = ARM_MUSCLES.has(primary) ? 'arm' : 'iso';
-  } else {
-    // Compounds
-    if (primary === 'anterior delt')                                                  tier = 'shoulder';
-    else if (LEG_COMPOUND_MUSCLES.has(primary) && !name.includes('pull-through'))    tier = 'leg';
-    else if (PUSH_MUSCLES.has(primary))                                               tier = 'push';
-    else                                                                              tier = 'pull';
-  }
-
-  return REST_TIERS[tier][band];
+  return restRange(exercise)[band];
 }
 
 

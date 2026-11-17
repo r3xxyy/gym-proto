@@ -55,7 +55,8 @@ export function LockStage({ onDone }: { onDone: (id: string) => void }) {
     skip.current = null;
     endStage();
     // Only now, so opening an earlier card can't move the slot while the card is still flying home.
-    later(60, () => onDoneRef.current(id));
+    // Not via `later`: ending the stage re-runs the effect below, whose cleanup clears those timers.
+    setTimeout(() => onDoneRef.current(id), 60);
   }, []);
 
   const slam = useCallback((s: Stage) => {
