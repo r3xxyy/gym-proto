@@ -36,6 +36,9 @@ export type SessionBrief = {
   flags: { flag: string; reason: string; recommendation: string }[];
 };
 
+/** A coach read that is not tied to one finished session: a week review or an upcoming-session plan. */
+export type CoachNote = { generatedAt: number; sections: { heading: string; lines: string[] }[] };
+
 export type ChatMessage = { role: 'athlete' | 'coach'; text: string };
 
 export type HistoryEntry = {

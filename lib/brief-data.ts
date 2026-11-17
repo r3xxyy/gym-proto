@@ -52,7 +52,7 @@ export type BriefInput = {
 };
 
 const num = (v: string | undefined) => parseFloat(v ?? '');
-const fmtSet = (s: Exercise['sets'][number]) => {
+export const fmtSet = (s: Exercise['sets'][number]) => {
   const drops = s.drops.filter(d => d.weight || d.reps).map(d => `${d.weight}x${d.reps}`).join('/');
   return `${s.weight}kg x ${s.reps}${s.rpe ? ` @RPE${s.rpe}` : ''}${s.restBefore !== undefined ? ` rest ${s.restBefore}s` : ''}${s.setSecs !== undefined ? ` set ${s.setSecs}s` : ''}${drops ? ` +drops ${drops}` : ''}`;
 };
@@ -108,7 +108,9 @@ export function buildBriefInput(args: {
 }): BriefInput {
   const { workout, gym, exercises, epoch, programWeek } = args;
   const bias = args.rpeBias?.bias ?? 0;
-  const history = args.history.filter(h => !(h.date === args.date && h.workoutName === workout));
+  // Only sessions up to this one count as history, so a past session is judged against what came before it.
+  const at = parseDateLocal(args.date);
+  const history = args.history.filter(h => !(h.date === args.date && h.workoutName === workout) && (at <= 0 || parseDateLocal(h.date) <= at));
   const ordered = exercises.filter(ex => loggedSets(ex).length > 0);
 
   const out: BriefExercise[] = ordered.map((ex, i) => {

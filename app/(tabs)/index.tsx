@@ -34,7 +34,12 @@ import { fadeAllLocks, getCard, requestOpen } from '@/lib/lock-store';
 import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
-import { askCoach, generateBrief } from '@/lib/brief';
+import { askAbout, askCoach, generateBrief } from '@/lib/brief';
+import { generateUpcoming, generateWeekReview, upcomingContext, weekContext } from '@/lib/coach-note';
+import type { NoteContext } from '@/lib/coach-note';
+import { CoachScreen } from '@/components/coach-screen';
+import { NoteCard } from '@/components/note-card';
+import { BriefCard } from '@/components/brief-card';
 import { loadCoachLog, rpeBias, useCoachLog } from '@/lib/coach-log';
 import { rpe8Guide } from '@/lib/rpe-load';
 import { markRestEnd, resetTicks, setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
@@ -46,7 +51,7 @@ import { personalRecords } from '@/lib/progress';
 import { getRestDuration, isHeavySet } from '@/lib/rest';
 import { RESTORED_SESSIONS } from '@/lib/seed-history';
 import { ACTIVE_SESSION_PATH, BADGES_PATH, BW_PATH, EPOCH_PATH, GYM_PATH, GYMS_PATH, HIDDEN_GYMS_PATH, HISTORY_PATH, PENDING_PATH, WEEK_PLAN_PATH } from '@/lib/storage';
-import type { Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
+import type { ChatMessage, CoachNote, Drop, Exercise, HistoryEntry, UnlockedBadge } from '../../types';
 import { checkNewBadges } from '../../constants/badges';
 import type { BadgeDefinition } from '../../constants/badges';
 import { PROGRAM_EPOCH, getCurrentProgramWeek, getCurrentWeekBounds, SWAP_POOL, getWeekExercises, SPLIT, SPLIT_LABEL, WORKOUT_TO_DAY, WEEK_DAYS, DAY_TEXT_STYLES } from '../../constants/programs';
@@ -142,7 +147,7 @@ function RestReadout({ duration, isOvertime }: { duration: number; isOvertime: b
 }
 
 export default function HomeScreen() {
-  const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history'>('home');
+  const [screen, setScreen] = useState<'home' | 'active' | 'summary' | 'history' | 'coach'>('home');
   const prevScreenRef = useRef<'home' | 'active'>('home');
   const [paused, setPaused] = useState(false);
   const [finalSeconds, setFinalSeconds] = useState(0);
@@ -155,6 +160,8 @@ export default function HomeScreen() {
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const listTopRef = useRef<any>(null); // zero-height marker at the top of the list content
   const exercisesRef = useRef<Exercise[]>([]);
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const pendingRef = useRef<HistoryEntry | null>(null);
   useEffect(() => { exercisesRef.current = exercises; });
 
   // After a finished exercise slams home: open the next unfinished one and bring it to the top.
@@ -192,6 +199,7 @@ export default function HomeScreen() {
   const [savedGyms, setSavedGyms] = useState<string[]>([]);
   const [hiddenGyms, setHiddenGyms] = useState<string[]>(['AF Stratford']);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
+  useEffect(() => { historyRef.current = history; pendingRef.current = pendingEntry; });
   const [briefStatus, setBriefStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
   const [asking, setAsking] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
@@ -513,52 +521,156 @@ export default function HomeScreen() {
     );
   }
 
-  /** Asks the coach for its read of a finished session; the result rides on the pending entry so Done saves it. */
+  /** The entry as last saved, whether it is still the pending session or already in history. */
+  function latestEntry(id: string): HistoryEntry | undefined {
+    return pendingRef.current?.id === id ? pendingRef.current : historyRef.current.find(h => h.id === id);
+  }
+
+  /** Saves an updated entry where it lives: the pending session (so Done keeps it) or the history file. */
+  function saveEntry(next: HistoryEntry) {
+    if (pendingRef.current?.id === next.id) {
+      pendingRef.current = next;
+      setPendingEntry(next);
+      FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(next)).catch(() => {});
+    } else if (historyRef.current.some(h => h.id === next.id)) {
+      const updated = historyRef.current.map(h => (h.id === next.id ? next : h));
+      historyRef.current = updated;
+      setHistory(updated);
+      FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify(updated)).catch(() => {});
+    }
+  }
+
+  const briefArgs = (entry: HistoryEntry) => ({
+    workout: entry.workoutName, date: entry.date, gym: entry.gym, exercises: entry.exercises, history: historyRef.current,
+    epoch: programEpoch, programWeek: Math.max(1, Math.floor((parseDateLocal(entry.date) - programEpoch) / (7 * 86400000)) + 1),
+    liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight: pendingRef.current?.id === entry.id ? bodyweight : undefined,
+    feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
+  });
+
+  /** Asks the coach for its read of a session; the result is saved with the entry. */
   function runBrief(entry: HistoryEntry) {
     const run = ++briefRun.current;
-    if (!entry.exercises.some(ex => ex.sets.some(set => set.done && set.weight && set.reps))) { setBriefStatus('none'); return; }
+    if (!entry.exercises.some(ex => ex.sets.some(set => set.done !== false && set.weight && set.reps))) { setBriefStatus('none'); return; }
     setBriefStatus('loading');
-    generateBrief({
-      workout: entry.workoutName, date: entry.date, gym: entry.gym, exercises: entry.exercises, history,
-      epoch: programEpoch, programWeek: currentWeek, liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight,
-      feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
-    }).then(brief => {
+    generateBrief(briefArgs(entry)).then(brief => {
       if (run !== briefRun.current) return;
       if (!brief) { setBriefStatus('failed'); return; }
-      const withBrief = { ...entry, brief };
-      setPendingEntry(cur => (cur && cur.id === entry.id ? withBrief : cur));
-      FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(withBrief)).catch(() => {});
+      saveEntry({ ...(latestEntry(entry.id) ?? entry), brief });
       setBriefStatus('ready');
     });
   }
 
-  /** A follow-up question about the brief. The question joins the saved thread at once; the answer follows. */
+  /** A follow-up question about a session brief. The question joins the saved thread at once; the answer follows. */
   function ask(question: string) {
-    const entry = pendingEntry;
+    const entry = latestEntry(coachTarget?.mode === 'session' ? coachTarget.id : pendingRef.current?.id ?? '');
     if (!entry?.brief || asking) return;
     // A retry resends the unanswered last question without adding it twice.
     const prior = entry.chat ?? [];
     const thread = prior[prior.length - 1]?.role === 'athlete' && prior[prior.length - 1].text === question
       ? prior
       : [...prior, { role: 'athlete' as const, text: question }];
-    const withQ = { ...entry, chat: thread };
-    setPendingEntry(withQ);
-    FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(withQ)).catch(() => {});
+    saveEntry({ ...entry, chat: thread });
     setAsking(true);
     setAskFailed(false);
-    askCoach({
-      workout: entry.workoutName, date: entry.date, gym: entry.gym, exercises: entry.exercises, history,
-      epoch: programEpoch, programWeek: currentWeek, liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight,
-      feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
-    }, entry.brief, thread).then(reply => {
+    askCoach(briefArgs(entry), entry.brief, thread).then(reply => {
       setAsking(false);
       if (!reply) { setAskFailed(true); return; }
-      setPendingEntry(cur => {
-        if (!cur || cur.id !== entry.id) return cur;
-        const next = { ...cur, chat: [...(cur.chat ?? thread), { role: 'coach' as const, text: reply }] };
-        FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(next)).catch(() => {});
-        return next;
-      });
+      const cur = latestEntry(entry.id);
+      if (cur) saveEntry({ ...cur, chat: [...(cur.chat ?? thread), { role: 'coach' as const, text: reply }] });
+    });
+  }
+
+  // ── In-app coach for a past session, this week or an upcoming session ──
+  const noteRun = useRef(0);
+  const [coachTarget, setCoachTarget] = useState<{ mode: 'session'; id: string } | { mode: 'week' } | { mode: 'upcoming'; day: number } | null>(null);
+  const [note, setNote] = useState<CoachNote | null>(null);
+  const [noteCtx, setNoteCtx] = useState<NoteContext | null>(null);
+  const [noteStatus, setNoteStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
+  const [noteChat, setNoteChat] = useState<ChatMessage[]>([]);
+
+  function runNote(target: { mode: 'week' } | { mode: 'upcoming'; day: number }) {
+    const run = ++noteRun.current;
+    const bias = rpeBias(useCoachLog.getState().nudges);
+    const ctx = target.mode === 'week'
+      ? weekContext({ entries: thisWeekHistory, history: historyRef.current, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias })
+      : upcomingContext({ day: target.day, plan: weekPlan[target.day] ?? [], history: historyRef.current, gym: activeGym || undefined, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias });
+    setNoteCtx(ctx);
+    setNote(null);
+    setNoteChat([]);
+    setNoteStatus('loading');
+    const job = target.mode === 'week' ? generateWeekReview(ctx, currentWeek) : generateUpcoming(ctx);
+    job.then(result => {
+      if (run !== noteRun.current) return;
+      if (!result) { setNoteStatus(((ctx as any).sessions ?? (ctx as any).exercises)?.length ? 'failed' : 'none'); return; }
+      setNote(result);
+      setNoteStatus('ready');
+    });
+  }
+
+  function openCoach(target: NonNullable<typeof coachTarget>) {
+    briefRun.current++;
+    setCoachTarget(target);
+    setAsking(false);
+    setAskFailed(false);
+    prevScreenRef.current = 'home';
+    setScreen('coach');
+    if (target.mode === 'session') {
+      const entry = latestEntry(target.id);
+      if (entry?.brief) setBriefStatus('ready');
+      else if (entry) runBrief(entry);
+    } else {
+      runNote(target);
+    }
+  }
+
+  const coachEntry = coachTarget?.mode === 'session' ? history.find(h => h.id === coachTarget.id) : undefined;
+  const coachTitle = !coachTarget ? '' : coachTarget.mode === 'session'
+    ? `SESSION ANALYSIS — ${coachEntry?.workoutName ?? ''} | ${coachEntry?.date ?? ''}`
+    : coachTarget.mode === 'week' ? `WEEK ${currentWeek} REVIEW` : `NEXT UP — ${SPLIT[coachTarget.day]} | Wk ${currentWeek}`;
+
+  // The home buttons call through a ref: referencing openCoach directly makes the React Compiler lint
+  // mistake the older rest-timer functions for render-time code.
+  const openCoachRef = useRef<typeof openCoach | null>(null);
+  useEffect(() => { openCoachRef.current = openCoach; });
+
+  function leaveCoach() {
+    noteRun.current++;
+    briefRun.current++;
+    setScreen('home');
+  }
+
+  function retryCoach() {
+    if (!coachTarget) return;
+    if (coachTarget.mode === 'session') { if (coachEntry) runBrief(coachEntry); } else runNote(coachTarget);
+  }
+
+  function shareCoach() {
+    if (!coachTarget) return;
+    if (coachTarget.mode === 'session' && coachEntry) {
+      Share.share({ message: formatSessionForCoach(coachEntry.workoutName, coachEntry.date, coachEntry.duration, coachEntry.restTime, coachEntry.exercises, undefined, history, coachEntry.gym, programEpoch) });
+    } else if (coachTarget.mode === 'week') {
+      Share.share({ message: formatWeekForCoach(thisWeekHistory) });
+    } else if (coachTarget.mode === 'upcoming') {
+      Share.share({ message: formatUpcomingSessionForCoach(coachTarget.day, weekPlan, history) });
+    }
+  }
+
+  function askNote(question: string) {
+    if (!note || !noteCtx || asking) return;
+    const prior = noteChat;
+    const thread = prior[prior.length - 1]?.role === 'athlete' && prior[prior.length - 1].text === question
+      ? prior
+      : [...prior, { role: 'athlete' as const, text: question }];
+    setNoteChat(thread);
+    setAsking(true);
+    setAskFailed(false);
+    const run = noteRun.current;
+    const { generatedAt: _t, ...body } = note;
+    askAbout(noteCtx, body, thread).then(reply => {
+      if (run !== noteRun.current) return;
+      setAsking(false);
+      if (!reply) { setAskFailed(true); return; }
+      setNoteChat([...thread, { role: 'coach' as const, text: reply }]);
     });
   }
 
@@ -1043,9 +1155,7 @@ export default function HomeScreen() {
                       })}
                     </View>
                     {completedDays.length === WEEK_DAYS.length && (
-                      <TouchableOpacity style={[poster.coachBtn, { marginHorizontal: 24 }]} onPress={() => {
-                        Share.share({ message: formatWeekForCoach(thisWeekHistory) });
-                      }}>
+                      <TouchableOpacity style={[poster.coachBtn, { marginHorizontal: 24 }]} onPress={() => openCoachRef.current?.({ mode: 'week' })}>
                         <Text style={poster.coachBtnText}>Coach This Week →</Text>
                       </TouchableOpacity>
                     )}
@@ -1171,12 +1281,12 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                       )}
                       {headlineDone && headlineEntry && (
-                        <TouchableOpacity style={poster.coachBtn} onPress={() => Share.share({ message: formatSessionForCoach(SPLIT[headlineDay], headlineEntry.date, headlineEntry.duration, headlineEntry.restTime, headlineEntry.exercises, undefined, history, headlineEntry.gym, programEpoch) })}>
+                        <TouchableOpacity style={poster.coachBtn} onPress={() => openCoachRef.current?.({ mode: 'session', id: headlineEntry.id })}>
                           <Text style={poster.coachBtnText}>Coach This →</Text>
                         </TouchableOpacity>
                       )}
                       {!headlineDone && (
-                        <TouchableOpacity style={poster.coachBtn} onPress={() => Share.share({ message: formatUpcomingSessionForCoach(headlineDay, weekPlan, history) })}>
+                        <TouchableOpacity style={poster.coachBtn} onPress={() => openCoachRef.current?.({ mode: 'upcoming', day: headlineDay })}>
                           <Text style={poster.coachBtnText}>Coach This →</Text>
                         </TouchableOpacity>
                       )}
@@ -1204,9 +1314,7 @@ export default function HomeScreen() {
                       })}
                   </View>
                   {completedDays.length === WEEK_DAYS.length && (
-                    <TouchableOpacity style={[poster.coachBtn, { marginHorizontal: 24 }]} onPress={() => {
-                      Share.share({ message: formatWeekForCoach(thisWeekHistory) });
-                    }}>
+                    <TouchableOpacity style={[poster.coachBtn, { marginHorizontal: 24 }]} onPress={() => openCoachRef.current?.({ mode: 'week' })}>
                       <Text style={poster.coachBtnText}>Coach This Week →</Text>
                     </TouchableOpacity>
                   )}
@@ -1382,6 +1490,31 @@ export default function HomeScreen() {
             runBrief(rated);
           }}
         />
+      )}
+
+      {/* ── Coach: a past session, this week or an upcoming session ── */}
+      {screen === 'coach' && coachTarget && (
+        <CoachScreen
+          title={coachTitle}
+          onBack={leaveCoach}
+          ready={coachTarget.mode === 'session' ? briefStatus === 'ready' && !!coachEntry?.brief : noteStatus === 'ready'}
+          chat={coachTarget.mode === 'session' ? coachEntry?.chat ?? [] : noteChat}
+          asking={asking}
+          askFailed={askFailed}
+          onAsk={coachTarget.mode === 'session' ? ask : askNote}
+          onShare={shareCoach}>
+          {coachTarget.mode === 'session' && coachEntry && briefStatus !== 'none' ? (
+            <BriefCard title={coachTitle} status={briefStatus} brief={coachEntry.brief} onRetry={retryCoach} />
+          ) : (
+            <NoteCard
+              title={coachTarget.mode === 'session' ? coachTitle : 'COACH'}
+              status={coachTarget.mode === 'session' ? 'none' : noteStatus}
+              note={note}
+              empty={coachTarget.mode === 'session' ? 'Nothing was logged in this session to coach.' : coachTarget.mode === 'week' ? 'No finished sessions this week yet.' : 'Nothing planned for this day.'}
+              onRetry={retryCoach}
+            />
+          )}
+        </CoachScreen>
       )}
 
       {/* ── History ── */}

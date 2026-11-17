@@ -90,7 +90,9 @@ const SCHEMA = {
   required: ['performance', 'targets', 'flags'],
 };
 
-const CHAT_SYSTEM = SYSTEM.split('# Output')[0] + `# Follow-up
+export const BASE_SYSTEM = SYSTEM.split('# Output')[0];
+
+const CHAT_SYSTEM = BASE_SYSTEM + `# Follow-up
 The athlete is asking about the brief you just wrote. Answer in 60 words or fewer, plain text, numbers first, definitive. Use only DATA and your brief; if the answer is not in them, say so in one line. You may suggest changing a target, but you cannot change the plan yourself. Reply as JSON: { "reply": string }.`;
 
 const CHAT_SCHEMA = { type: 'OBJECT', properties: { reply: { type: 'STRING' } }, required: ['reply'] };
@@ -105,15 +107,16 @@ export async function generateBrief(args: Parameters<typeof buildBriefInput>[0])
   return parseBrief(raw);
 }
 
-/** The coach's answer to a follow-up about a brief it wrote. Null on any failure; the caller keeps the question. */
-export async function askCoach(
-  args: Parameters<typeof buildBriefInput>[0],
-  brief: SessionBrief,
-  messages: ChatMessage[],
-): Promise<string | null> {
-  const { generatedAt: _t, ...briefBody } = brief;
+/** The coach's answer to a follow-up about something it wrote. Null on any failure; the caller keeps the question. */
+export async function askAbout(context: object, written: object, messages: ChatMessage[]): Promise<string | null> {
   const talk = messages.map(m => `${m.role === 'athlete' ? 'Athlete' : 'Coach'}: ${m.text}`).join('\n');
-  const prompt = `${briefPrompt(buildBriefInput(args))}\n\nYOUR BRIEF\n${JSON.stringify(briefBody)}\n\nCONVERSATION\n${talk}`;
+  const prompt = `DATA\n${JSON.stringify(context)}\n\nYOUR NOTE\n${JSON.stringify(written)}\n\nCONVERSATION\n${talk}`;
   const out = await callGemini<{ reply?: unknown }>(prompt, CHAT_SCHEMA, { temperature: 0.4, timeoutMs: BRIEF_TIMEOUT_MS, system: CHAT_SYSTEM });
   return typeof out?.reply === 'string' && out.reply.trim() ? out.reply.trim() : null;
+}
+
+/** Follow-up about a session brief. */
+export function askCoach(args: Parameters<typeof buildBriefInput>[0], brief: SessionBrief, messages: ChatMessage[]) {
+  const { generatedAt: _t, ...body } = brief;
+  return askAbout(buildBriefInput(args), body, messages);
 }

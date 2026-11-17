@@ -4,10 +4,10 @@ import {
   BottomSheetBackdrop,
   BottomSheetModal,
   BottomSheetScrollView,
+  BottomSheetTextInput,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import { resolveExercise } from '@/lib/exercise-ai';
-import { SheetTextInput } from '@/components/sheet-text-input';
 import { Ink } from '@/constants/theme';
 import type { Exercise } from '@/types';
 
@@ -28,9 +28,17 @@ export function SwapSheet({ open, title, options, onPick, onClose }: {
   const [query, setQuery] = useState('');
   const [resolving, setResolving] = useState(false);
 
+  // dismiss() is only valid after a present(): called on a sheet that was never opened it leaves the
+  // modal "dismissing", and the next present() is then silently ignored.
+  const presented = useRef(false);
   useEffect(() => {
-    if (open) ref.current?.present();
-    else ref.current?.dismiss();
+    if (open) {
+      presented.current = true;
+      ref.current?.present();
+    } else if (presented.current) {
+      presented.current = false;
+      ref.current?.dismiss();
+    }
   }, [open]);
 
   const backdrop = useCallback((props: BottomSheetBackdropProps) => (
@@ -63,7 +71,7 @@ export function SwapSheet({ open, title, options, onPick, onClose }: {
       onDismiss={() => { setQuery(''); onClose(); }}>
       <BottomSheetScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>{title}</Text>
-        <SheetTextInput
+        <BottomSheetTextInput
           style={s.search}
           value={query}
           onChangeText={setQuery}
