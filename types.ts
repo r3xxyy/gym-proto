@@ -36,6 +36,8 @@ export type SessionBrief = {
   flags: { flag: string; reason: string; recommendation: string }[];
 };
 
+export type ChatMessage = { role: 'athlete' | 'coach'; text: string };
+
 export type HistoryEntry = {
   id: string;
   date: string;
@@ -48,6 +50,8 @@ export type HistoryEntry = {
   brief?: SessionBrief;
   /** How the session felt, 1 (rough) to 5 (great), tapped on the summary screen. */
   feel?: number;
+  /** Follow-up questions about the brief and the coach's answers. */
+  chat?: ChatMessage[];
 };
 
 export type UnlockedBadge = {

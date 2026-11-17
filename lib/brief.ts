@@ -1,7 +1,7 @@
 import { callGemini } from '@/lib/gemini';
 import { buildBriefInput, parseBrief } from '@/lib/brief-data';
 import type { BriefInput } from '@/lib/brief-data';
-import type { SessionBrief } from '../types';
+import type { ChatMessage, SessionBrief } from '../types';
 
 const BRIEF_TIMEOUT_MS = 25000;
 
@@ -90,6 +90,11 @@ const SCHEMA = {
   required: ['performance', 'targets', 'flags'],
 };
 
+const CHAT_SYSTEM = SYSTEM.split('# Output')[0] + `# Follow-up
+The athlete is asking about the brief you just wrote. Answer in 60 words or fewer, plain text, numbers first, definitive. Use only DATA and your brief; if the answer is not in them, say so in one line. You may suggest changing a target, but you cannot change the plan yourself. Reply as JSON: { "reply": string }.`;
+
+const CHAT_SCHEMA = { type: 'OBJECT', properties: { reply: { type: 'STRING' } }, required: ['reply'] };
+
 export const briefPrompt = (input: BriefInput) => `DATA\n${JSON.stringify(input)}`;
 
 /** The in-app coach's read of a finished session. Null when there is nothing to coach, no key, or the call fails. */
@@ -98,4 +103,17 @@ export async function generateBrief(args: Parameters<typeof buildBriefInput>[0])
   if (!input.exercises.length) return null;
   const raw = await callGemini<unknown>(briefPrompt(input), SCHEMA, { temperature: 0.3, timeoutMs: BRIEF_TIMEOUT_MS, system: SYSTEM });
   return parseBrief(raw);
+}
+
+/** The coach's answer to a follow-up about a brief it wrote. Null on any failure; the caller keeps the question. */
+export async function askCoach(
+  args: Parameters<typeof buildBriefInput>[0],
+  brief: SessionBrief,
+  messages: ChatMessage[],
+): Promise<string | null> {
+  const { generatedAt: _t, ...briefBody } = brief;
+  const talk = messages.map(m => `${m.role === 'athlete' ? 'Athlete' : 'Coach'}: ${m.text}`).join('\n');
+  const prompt = `${briefPrompt(buildBriefInput(args))}\n\nYOUR BRIEF\n${JSON.stringify(briefBody)}\n\nCONVERSATION\n${talk}`;
+  const out = await callGemini<{ reply?: unknown }>(prompt, CHAT_SCHEMA, { temperature: 0.4, timeoutMs: BRIEF_TIMEOUT_MS, system: CHAT_SYSTEM });
+  return typeof out?.reply === 'string' && out.reply.trim() ? out.reply.trim() : null;
 }

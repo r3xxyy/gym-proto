@@ -4,8 +4,9 @@ import { Ink } from '@/constants/theme';
 import { formatTime } from '@/lib/format';
 import { estimateNetKcal, sessionVolume } from '@/lib/session-stats';
 import { BriefCard } from './brief-card';
+import { BriefChat } from './brief-chat';
 import { NUMPAD_DONE_ID } from './exercise-card';
-import type { Exercise, SessionBrief } from '../types';
+import type { ChatMessage, Exercise, SessionBrief } from '../types';
 
 type Props = {
   exercises: Exercise[];
@@ -25,16 +26,20 @@ type Props = {
   onRetryBrief: () => void;
   feel?: number;
   onFeel: (n: number) => void;
+  chat: ChatMessage[];
+  asking: boolean;
+  askFailed: boolean;
+  onAsk: (question: string) => void;
 };
 
 /** The screen shown after Finish workout: totals, a bodyweight field for the kcal estimate, and next steps. */
-export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onCoach, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel }: Props) {
+export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onCoach, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel, chat, asking, askFailed, onAsk }: Props) {
   return (
     <View style={{ flex: 1, backgroundColor: Ink.bg }}>
       <View style={sum2.header}>
         <Text style={sum2.title}>Workout done</Text>
       </View>
-      <ScrollView contentContainerStyle={sum2.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      <ScrollView contentContainerStyle={sum2.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
         <View style={sum2.hero}>
           <Text style={sum2.heroLabel}>Total volume</Text>
           <Text style={sum2.heroValue}>{sessionVolume(exercises).toLocaleString()}<Text style={sum2.heroUnit}> kg</Text></Text>
@@ -79,6 +84,9 @@ export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, 
         )}
         {briefStatus !== 'none' && (
           <BriefCard title={briefTitle} status={briefStatus} brief={brief} onRetry={onRetryBrief} />
+        )}
+        {briefStatus === 'ready' && brief && (
+          <BriefChat messages={chat} asking={asking} failed={askFailed} onAsk={onAsk} />
         )}
 
         <Text style={[sum2.fieldLabel, { marginTop: 24 }]}>Bodyweight (kg), used for the kcal estimate</Text>

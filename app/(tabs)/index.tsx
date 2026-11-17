@@ -34,7 +34,7 @@ import { fadeAllLocks, getCard, requestOpen } from '@/lib/lock-store';
 import { SwapSheet } from '@/components/swap-sheet';
 import { Ink, Legible } from '@/constants/theme';
 import { formatSessionForCoach, formatUpcomingSessionForCoach, formatWeekForCoach } from '@/lib/coach-text';
-import { generateBrief } from '@/lib/brief';
+import { askCoach, generateBrief } from '@/lib/brief';
 import { loadCoachLog, rpeBias, useCoachLog } from '@/lib/coach-log';
 import { rpe8Guide } from '@/lib/rpe-load';
 import { markRestEnd, resetTicks, setCurrentRestSecs, setSeconds, setTotalSessionSecs, useTimerStore } from '@/lib/workout-store';
@@ -193,6 +193,8 @@ export default function HomeScreen() {
   const [hiddenGyms, setHiddenGyms] = useState<string[]>(['AF Stratford']);
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
   const [briefStatus, setBriefStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
+  const [asking, setAsking] = useState(false);
+  const [askFailed, setAskFailed] = useState(false);
   const briefRun = useRef(0); // bumped to drop a reply that arrives after the session moved on
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [newBadgeQueue, setNewBadgeQueue] = useState<BadgeDefinition[]>([]);
@@ -530,6 +532,36 @@ export default function HomeScreen() {
     });
   }
 
+  /** A follow-up question about the brief. The question joins the saved thread at once; the answer follows. */
+  function ask(question: string) {
+    const entry = pendingEntry;
+    if (!entry?.brief || asking) return;
+    // A retry resends the unanswered last question without adding it twice.
+    const prior = entry.chat ?? [];
+    const thread = prior[prior.length - 1]?.role === 'athlete' && prior[prior.length - 1].text === question
+      ? prior
+      : [...prior, { role: 'athlete' as const, text: question }];
+    const withQ = { ...entry, chat: thread };
+    setPendingEntry(withQ);
+    FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(withQ)).catch(() => {});
+    setAsking(true);
+    setAskFailed(false);
+    askCoach({
+      workout: entry.workoutName, date: entry.date, gym: entry.gym, exercises: entry.exercises, history,
+      epoch: programEpoch, programWeek: currentWeek, liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight,
+      feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
+    }, entry.brief, thread).then(reply => {
+      setAsking(false);
+      if (!reply) { setAskFailed(true); return; }
+      setPendingEntry(cur => {
+        if (!cur || cur.id !== entry.id) return cur;
+        const next = { ...cur, chat: [...(cur.chat ?? thread), { role: 'coach' as const, text: reply }] };
+        FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(next)).catch(() => {});
+        return next;
+      });
+    });
+  }
+
   function endWorkout() {
     resetTicks();
     // Compute final times from refs to avoid stale state
@@ -570,6 +602,8 @@ export default function HomeScreen() {
   function continueWorkout() {
     briefRun.current++;
     setBriefStatus('none');
+    setAsking(false);
+    setAskFailed(false);
     FileSystem.deleteAsync(PENDING_PATH, { idempotent: true }).catch(() => {});
     // Restore accumulators from frozen values so timer picks up seamlessly
     activeAccRef.current = finalSeconds;
@@ -1336,6 +1370,10 @@ export default function HomeScreen() {
           briefTitle={`SESSION ANALYSIS — ${pendingEntry?.workoutName ?? sessionWorkout} | Wk ${currentWeek}`}
           onRetryBrief={() => pendingEntry && runBrief(pendingEntry)}
           feel={pendingEntry?.feel}
+          chat={pendingEntry?.chat ?? []}
+          asking={asking}
+          askFailed={askFailed}
+          onAsk={ask}
           onFeel={n => {
             if (!pendingEntry) return;
             const rated = { ...pendingEntry, feel: n, brief: undefined };
