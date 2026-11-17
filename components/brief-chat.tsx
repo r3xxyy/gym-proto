@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ink } from '@/constants/theme';
+import { lastFailureText } from '@/lib/gemini';
 import type { ChatMessage } from '../types';
 
 const QUICK = ['Why these loads?', 'What if I push harder?', 'What do I fix first?'];
@@ -36,7 +37,7 @@ export function BriefChat({ messages, asking, failed, onAsk }: Props) {
       {asking && <View style={s.row}><ActivityIndicator color={Ink.textDim} /><Text style={s.dim}>Thinking…</Text></View>}
       {failed && !asking && (
         <View>
-          <Text style={s.dim}>No answer. Check your connection.</Text>
+          <Text style={s.dim}>No answer: {lastFailureText() ?? 'unknown reason'}.</Text>
           <TouchableOpacity style={s.retry} onPress={() => send(messages[messages.length - 1]?.text ?? '')}>
             <Text style={s.retryText}>Send again</Text>
           </TouchableOpacity>

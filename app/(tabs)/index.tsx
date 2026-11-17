@@ -38,6 +38,10 @@ import { askAbout, askCoach, generateBrief } from '@/lib/brief';
 import { generateUpcoming, generateWeekReview, upcomingContext, weekContext } from '@/lib/coach-note';
 import type { NoteContext } from '@/lib/coach-note';
 import { CoachScreen } from '@/components/coach-screen';
+import { Diagnostics } from '@/components/diagnostics';
+import { MachineScan } from '@/components/machine-scan';
+import { loadMachines } from '@/lib/machines';
+import { loadKeyOverride } from '@/lib/gemini-key';
 import { NoteCard } from '@/components/note-card';
 import { BriefCard } from '@/components/brief-card';
 import { loadCoachLog, rpeBias, useCoachLog } from '@/lib/coach-log';
@@ -202,6 +206,9 @@ export default function HomeScreen() {
   const [pendingEntry, setPendingEntry] = useState<HistoryEntry | null>(null);
   useEffect(() => { historyRef.current = history; pendingRef.current = pendingEntry; });
   const [briefStatus, setBriefStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
+  const [showDiag, setShowDiag] = useState(false);
+  // Scanning a machine from the add/swap sheet: where the result goes once it is confirmed.
+  const [scanFor, setScanFor] = useState<null | { kind: 'active' | 'plan'; day?: number; replaceId: string | null }>(null);
   const [asking, setAsking] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
   const briefRun = useRef(0); // bumped to drop a reply that arrives after the session moved on
@@ -664,6 +671,24 @@ export default function HomeScreen() {
     }
   }
 
+  /** A confirmed scan: add the machine to today's session, or put it in the plan for the day. */
+  function addScanned(opt: Omit<Exercise, 'sets'>, kg: number | null) {
+    const t = scanFor;
+    if (!t) return;
+    if (t.kind === 'active') {
+      const blank = () => ({ weight: kg ? String(kg) : '', reps: kg ? '10' : '', rpe: '', drops: [] });
+      if (t.replaceId === null) setExercises(prev => [...prev, { ...opt, sets: [blank(), blank(), blank()] }]);
+      else setExercises(prev => prev.map(e => (e.id === t.replaceId ? { ...opt, sets: e.sets, startedAt: e.startedAt, endedAt: e.endedAt } : e)));
+    } else if (t.day !== undefined) {
+      const day = t.day;
+      setWeekPlan(prev => ({
+        ...prev,
+        [day]: t.replaceId === null ? [...(prev[day] ?? []), opt] : (prev[day] ?? []).map(e => (e.id === t.replaceId ? opt : e)),
+      }));
+    }
+    setScanFor(null);
+  }
+
   function askNote(question: string) {
     if (!note || !noteCtx || asking) return;
     const prior = noteChat;
@@ -954,6 +979,8 @@ export default function HomeScreen() {
         await FileSystem.writeAsStringAsync(HISTORY_PATH, JSON.stringify([]));
       }
       loadCoachLog();
+      loadMachines();
+      loadKeyOverride();
       const bwInfo = await FileSystem.getInfoAsync(BW_PATH);
       if (bwInfo.exists) {
         const raw = await FileSystem.readAsStringAsync(BW_PATH);
@@ -1145,7 +1172,7 @@ export default function HomeScreen() {
                   <>
                     <View style={poster.supportSection}>
                       <Text style={poster.dateLine}>{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.')}</Text>
-                      <Text style={poster.title}>Week {currentWeek}</Text>
+                      <Text style={poster.title} onLongPress={() => setShowDiag(true)}>Week {currentWeek}</Text>
                       {WEEK_DAYS.map((day, i) => {
                         const done = completedDays.includes(day);
                         const isRest = !!(done && thisWeekHistory.find(h => WORKOUT_TO_DAY[h.workoutName] === day && h.isRestDay));
@@ -1348,6 +1375,7 @@ export default function HomeScreen() {
               setSwapContext(null);
             }}
             onClose={() => setSwapContext(null)}
+            onScan={() => { if (!swapContext) return; setScanFor({ kind: 'plan', day: swapContext.day, replaceId: swapContext.exerciseId }); setSwapContext(null); }}
           />
 
           {/* ── Footer — START WORKOUT only ── */}
@@ -1461,6 +1489,7 @@ export default function HomeScreen() {
               setActiveSwapId(null);
             }}
             onClose={() => setActiveSwapId(null)}
+            onScan={() => { setScanFor({ kind: 'active', replaceId: activeSwapId === '__add__' ? null : activeSwapId }); setActiveSwapId(null); }}
           />
         </View>
       )}
@@ -1545,6 +1574,16 @@ export default function HomeScreen() {
           programEpoch={programEpoch}
         />
       )}
+      <MachineScan
+        visible={scanFor !== null}
+        onClose={() => setScanFor(null)}
+        history={history}
+        gym={activeGym || undefined}
+        bias={rpeAdjust}
+        onAdd={addScanned}
+      />
+      <Diagnostics visible={showDiag} onClose={() => setShowDiag(false)} />
+
       {/* ── Badge Unlock Overlay ── */}
       {newBadgeQueue.length > 0 && (
         <BadgeUnlockOverlay

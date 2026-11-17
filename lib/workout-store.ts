@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { computeTick } from './tick-timing';
 
 /**
  * Per-second display values for the active workout. Kept out of HomeScreen state so the
@@ -20,23 +21,11 @@ export const setCurrentRestSecs = (currentRestSecs: number) => useTimerStore.set
 let lastTickAt: number | null = null;
 let restEndedAt: number | null = null;
 
-/** Assumed lifting time of a set with no measured start: about 4 s a rep plus setup. */
-export const estimateSetSecs = (reps: number) => Math.round(Math.max(1, reps) * 4 + 10);
-
-/**
- * Marks a tick at `now` and returns the timing for that set, or null for the session's first set.
- * `setSecs` is only set when a rest ended between the previous tick and this one and the gap since then
- * is plausible for a set; `restSecs` is the tick-to-tick gap minus the set itself (measured, else estimated).
- */
+/** Marks a tick at `now` and returns that set's timing, or null for the session's first set. */
 export function markTick(now: number, reps: number): { restSecs: number; setSecs?: number } | null {
-  const prev = lastTickAt;
-  const ended = restEndedAt;
+  const timing = computeTick(now, lastTickAt, restEndedAt, reps);
   lastTickAt = now;
-  if (prev === null) return null;
-  const gap = Math.max(0, Math.round((now - prev) / 1000));
-  const measured = ended !== null && ended > prev ? Math.round((now - ended) / 1000) : undefined;
-  const setSecs = measured !== undefined && measured >= 3 && measured <= 300 ? measured : undefined;
-  return { restSecs: Math.max(0, gap - (setSecs ?? estimateSetSecs(reps))), ...(setSecs !== undefined ? { setSecs } : {}) };
+  return timing;
 }
 
 /** The rest timer ended or was resumed: the next set starts about now. */

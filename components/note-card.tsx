@@ -1,5 +1,6 @@
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ink } from '@/constants/theme';
+import { lastFailureText } from '@/lib/gemini';
 import type { CoachNote } from '../types';
 
 type Props = { title: string; status: 'loading' | 'ready' | 'failed' | 'none'; note?: CoachNote | null; empty: string; onRetry: () => void };
@@ -15,7 +16,7 @@ export function NoteCard({ title, status, note, empty, onRetry }: Props) {
       {status === 'none' && <Text style={s.dim}>{empty}</Text>}
       {status === 'failed' && (
         <View>
-          <Text style={s.dim}>Couldn&apos;t reach the coach. Check your connection and try again.</Text>
+          <Text style={s.dim}>Couldn&apos;t get the coach&apos;s read: {lastFailureText() ?? 'unknown reason'}.</Text>
           <TouchableOpacity style={s.retry} onPress={onRetry}><Text style={s.retryText}>Try again</Text></TouchableOpacity>
         </View>
       )}

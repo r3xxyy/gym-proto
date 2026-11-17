@@ -14,3 +14,5 @@ export const EPOCH_PATH         = FileSystem.documentDirectory + 'epoch.json';
 
 export const DELOAD_PATH        = FileSystem.documentDirectory + 'deloadDismissed.json';
 export const COACH_PATH        = FileSystem.documentDirectory + 'coachLog.json';
+export const MACHINES_PATH     = FileSystem.documentDirectory + 'machines.json';
+export const GEMINI_KEY_PATH   = FileSystem.documentDirectory + 'geminiKey.json';

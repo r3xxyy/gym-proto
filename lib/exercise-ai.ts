@@ -1,4 +1,5 @@
 import { callGemini } from '@/lib/gemini';
+import { MUSCLE_PROMPT, normalizeMuscles } from '@/lib/muscles';
 import type { Exercise } from '@/types';
 
 type Resolved = Omit<Exercise, 'sets'>;
@@ -17,8 +18,7 @@ const SCHEMA = {
 const PROMPT = (typed: string) =>
   `A lifter typed "${typed}" into a gym workout tracker. Work out which exercise they mean. ` +
   'Reply as JSON. "name": the standard exercise name in Title Case, with the equipment kept in it ' +
-  '(e.g. "Seated Cable Row", "Hammer Strength Chest Press"). "muscles": lowercase, comma-separated, ' +
-  'primary muscle first (e.g. "chest, triceps"). "type": Compound or Iso. "machine": the machine or ' +
+  '(e.g. "Seated Cable Row", "Hammer Strength Chest Press"). "muscles": comma-separated, primary first. ' + MUSCLE_PROMPT + ' "type": Compound or Iso. "machine": the machine or ' +
   'equipment used, or an empty string for free weights and bodyweight. If it is unclear, keep their wording.';
 
 const plain = (name: string): Resolved => ({
@@ -35,7 +35,7 @@ export async function resolveExercise(typed: string): Promise<Resolved> {
   if (!out || !name) return plain(typed);
   return {
     ...plain(name),
-    muscles: typeof out.muscles === 'string' ? out.muscles.trim().toLowerCase() : '',
+    muscles: typeof out.muscles === 'string' ? normalizeMuscles(out.muscles) : '',
     type: out.type === 'Compound' ? 'Compound' : 'Iso',
     cue: typeof out.machine === 'string' && out.machine.trim() ? `Machine: ${out.machine.trim()}` : '',
   };

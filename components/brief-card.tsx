@@ -1,5 +1,6 @@
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ink } from '@/constants/theme';
+import { lastFailureText } from '@/lib/gemini';
 import type { SessionBrief } from '../types';
 
 type Props = {
@@ -27,7 +28,7 @@ export function BriefCard({ title, status, brief, onRetry }: Props) {
 
       {status === 'failed' && (
         <View>
-          <Text style={s.dim}>Couldn&apos;t reach the coach. Check your connection and try again.</Text>
+          <Text style={s.dim}>Couldn&apos;t get the coach&apos;s read: {lastFailureText() ?? 'unknown reason'}.</Text>
           <TouchableOpacity style={s.retry} onPress={onRetry}><Text style={s.retryText}>Try again</Text></TouchableOpacity>
         </View>
       )}

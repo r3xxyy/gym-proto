@@ -17,12 +17,14 @@ type Option = Omit<Exercise, 'sets'>;
  * Gesture-driven sheet for swapping or adding an exercise; the search field rides above the keyboard.
  * A typed name is resolved to a proper exercise (name, muscles, machine) before it is picked.
  */
-export function SwapSheet({ open, title, options, onPick, onClose }: {
+export function SwapSheet({ open, title, options, onPick, onClose, onScan }: {
   open: boolean;
   title: string;
   options: Option[];
   onPick: (opt: Option) => void;
   onClose: () => void;
+  /** Offer to identify a machine from a photo or name and suggest a starting weight. */
+  onScan?: () => void;
 }) {
   const ref = useRef<BottomSheetModal>(null);
   const [query, setQuery] = useState('');
@@ -71,6 +73,12 @@ export function SwapSheet({ open, title, options, onPick, onClose }: {
       onDismiss={() => { setQuery(''); onClose(); }}>
       <BottomSheetScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>{title}</Text>
+        {onScan && (
+          <TouchableOpacity style={s.scan} onPress={onScan} accessibilityLabel="Scan a machine">
+            <Text style={s.optName}>Scan a machine</Text>
+            <Text style={s.optMuscles}>Photo or name, with a suggested starting weight</Text>
+          </TouchableOpacity>
+        )}
         <BottomSheetTextInput
           style={s.search}
           value={query}
@@ -105,6 +113,7 @@ const s = StyleSheet.create({
   content: { padding: 24, paddingTop: 8, paddingBottom: 48 },
   title: { fontSize: 18, fontWeight: '700', color: Ink.text, marginBottom: 12 },
   search: { backgroundColor: Ink.bg, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, fontSize: 16, color: Ink.text, marginBottom: 12 },
+  scan: { paddingVertical: 14, paddingHorizontal: 14, marginBottom: 12, borderWidth: 1, borderColor: Ink.text, borderRadius: 12 },
   option: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Ink.line },
   optName: { fontSize: 16, fontWeight: '500', color: Ink.text },
   optMuscles: { fontSize: 12, color: Ink.textFaint, marginTop: 2, textTransform: 'capitalize' },
