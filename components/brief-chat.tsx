@@ -4,7 +4,12 @@ import { Ink } from '@/constants/theme';
 import { lastFailureText } from '@/lib/gemini';
 import type { ChatMessage } from '../types';
 
-const QUICK = ['Why these loads?', 'What if I push harder?', 'What do I fix first?'];
+// A chip either sends its question at once, or starts a sentence for the lifter to finish.
+const QUICK: { label: string; send?: string; fill?: string }[] = [
+  { label: 'Why these loads?', send: 'Why these loads?' },
+  { label: 'Let me explain…', fill: 'I did this on purpose: ' },
+  { label: 'What would you try next?', send: 'What would you try next?' },
+];
 
 type Props = {
   messages: ChatMessage[];
@@ -31,6 +36,7 @@ export function BriefChat({ messages, asking, failed, onAsk }: Props) {
         <View key={i} style={[s.bubble, m.role === 'athlete' ? s.me : s.coach]}>
           <Text style={s.who}>{m.role === 'athlete' ? 'You' : 'Coach'}</Text>
           <Text style={s.msg}>{m.text}</Text>
+          {!!m.noted?.length && <Text style={s.noted}>Noted for next time: {m.noted.join(' · ')}</Text>}
         </View>
       ))}
 
@@ -47,8 +53,8 @@ export function BriefChat({ messages, asking, failed, onAsk }: Props) {
       {messages.length === 0 && (
         <View style={s.chips}>
           {QUICK.map(q => (
-            <TouchableOpacity key={q} style={s.chip} onPress={() => send(q)}>
-              <Text style={s.chipText}>{q}</Text>
+            <TouchableOpacity key={q.label} style={s.chip} onPress={() => (q.send ? send(q.send) : setText(q.fill ?? ''))}>
+              <Text style={s.chipText}>{q.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -82,6 +88,7 @@ const s = StyleSheet.create({
   coach: {},
   who: { fontFamily: 'Unbounded_500Medium', fontSize: 10, color: Ink.textDim, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 2 },
   msg: { fontSize: 14, color: Ink.text, lineHeight: 20 },
+  noted: { fontSize: 12, color: Ink.textFaint, marginTop: 6, lineHeight: 17 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
   dim: { fontSize: 14, color: Ink.textDim, marginTop: 10 },
   retry: { marginTop: 8, alignSelf: 'flex-start', borderWidth: 1, borderColor: Ink.line, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 18 },

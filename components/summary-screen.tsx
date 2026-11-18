@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { Ink } from '@/constants/theme';
@@ -25,6 +26,9 @@ type Props = {
   onRetryBrief: () => void;
   feel?: number;
   onFeel: (n: number) => void;
+  /** Why the lifter trained this way today; the coach reads it. */
+  athleteNote?: string;
+  onAthleteNote: (text: string) => void;
   chat: ChatMessage[];
   asking: boolean;
   askFailed: boolean;
@@ -32,7 +36,13 @@ type Props = {
 };
 
 /** The screen shown after Finish workout: totals, a bodyweight field for the kcal estimate, and next steps. */
-export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel, chat, asking, askFailed, onAsk }: Props) {
+export function SummaryScreen(props: Props) {
+  // The text box is local until the lifter sends it, so typing doesn't regenerate the brief.
+  const [why, setWhy] = useState(props.athleteNote ?? '');
+  return <SummaryBody {...props} why={why} setWhy={setWhy} />;
+}
+
+function SummaryBody({ exercises, finalSeconds, finalRest, bodyweight, onBodyweightChange, onDone, onContinue, brief, briefStatus, briefTitle, onRetryBrief, feel, onFeel, athleteNote, onAthleteNote, chat, asking, askFailed, onAsk, why, setWhy }: Props & { why: string; setWhy: (v: string) => void }) {
   return (
     <View style={{ flex: 1, backgroundColor: Ink.bg }}>
       <View style={sum2.header}>
@@ -79,6 +89,26 @@ export function SummaryScreen({ exercises, finalSeconds, finalRest, bodyweight, 
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+        )}
+        {briefStatus === 'none' && <Text style={[sum2.fieldLabel, { marginTop: 20 }]}>No sets were logged this time, so the coach has nothing to read yet. Log a few sets and it will.</Text>}
+        {briefStatus !== 'none' && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={sum2.fieldLabel}>Anything the coach should know? Why you trained this way today</Text>
+            <TextInput
+              style={[sum2.field, { height: 76, fontFamily: undefined, fontSize: 15, textAlign: 'left', paddingHorizontal: 14, paddingTop: 12 }]}
+              value={why}
+              onChangeText={setWhy}
+              placeholder="e.g. kept the weight the same on purpose, felt a tweak in my elbow, short on time…"
+              placeholderTextColor={Ink.textFaint}
+              multiline
+              textAlignVertical="top"
+            />
+            {why.trim() !== (athleteNote ?? '') && (
+              <TouchableOpacity style={sum2.secondary} onPress={() => onAthleteNote(why)}>
+                <Text style={sum2.secondaryText}>Update the coach&apos;s read</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         {briefStatus !== 'none' && (

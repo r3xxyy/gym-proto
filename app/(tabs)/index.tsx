@@ -41,6 +41,8 @@ import { CoachScreen } from '@/components/coach-screen';
 import { Diagnostics } from '@/components/diagnostics';
 import { MachineScan } from '@/components/machine-scan';
 import { loadMachines } from '@/lib/machines';
+import { addCoachNotes, loadCoachProfile, profileNotes } from '@/lib/coach-profile';
+import { useGeminiStatus } from '@/lib/gemini';
 import { loadKeyOverride } from '@/lib/gemini-key';
 import { NoteCard } from '@/components/note-card';
 import { BriefCard } from '@/components/brief-card';
@@ -207,6 +209,8 @@ export default function HomeScreen() {
   useEffect(() => { historyRef.current = history; pendingRef.current = pendingEntry; });
   const [briefStatus, setBriefStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>('none');
   const [showDiag, setShowDiag] = useState(false);
+  const needsBrief = useRef(false); // a restored summary still owes its brief
+  const runBriefRef = useRef<typeof runBrief | null>(null);
   // Scanning a machine from the add/swap sheet: where the result goes once it is confirmed.
   const [scanFor, setScanFor] = useState<null | { kind: 'active' | 'plan'; day?: number; replaceId: string | null }>(null);
   const [asking, setAsking] = useState(false);
@@ -553,16 +557,26 @@ export default function HomeScreen() {
     epoch: programEpoch, programWeek: Math.max(1, Math.floor((parseDateLocal(entry.date) - programEpoch) / (7 * 86400000)) + 1),
     liftingSecs: entry.duration, restSecs: entry.restTime, bodyweight: pendingRef.current?.id === entry.id ? bodyweight : undefined,
     feel: entry.feel, rpeBias: rpeBias(useCoachLog.getState().nudges),
+    athleteSays: entry.athleteNote, athleteNotes: profileNotes(),
   });
 
   /** Asks the coach for its read of a session; the result is saved with the entry. */
-  function runBrief(entry: HistoryEntry) {
+  function runBrief(entry: HistoryEntry, attempt = 0) {
     const run = ++briefRun.current;
     if (!entry.exercises.some(ex => ex.sets.some(set => set.done !== false && set.weight && set.reps))) { setBriefStatus('none'); return; }
     setBriefStatus('loading');
     generateBrief(briefArgs(entry)).then(brief => {
       if (run !== briefRun.current) return;
-      if (!brief) { setBriefStatus('failed'); return; }
+      if (!brief) {
+        // A busy or slow moment is worth one more go after a short pause; a missing or refused key is not.
+        const why = useGeminiStatus.getState().last?.failure;
+        if (attempt === 0 && (why === 'busy' || why === 'timeout' || why === 'offline' || why === 'bad-reply')) {
+          setTimeout(() => { if (run === briefRun.current) runBrief(entry, 1); }, 4000);
+          return;
+        }
+        setBriefStatus('failed');
+        return;
+      }
       saveEntry({ ...(latestEntry(entry.id) ?? entry), brief });
       setBriefStatus('ready');
     });
@@ -583,8 +597,9 @@ export default function HomeScreen() {
     askCoach(briefArgs(entry), entry.brief, thread).then(reply => {
       setAsking(false);
       if (!reply) { setAskFailed(true); return; }
+      const noted = addCoachNotes(reply.remember);
       const cur = latestEntry(entry.id);
-      if (cur) saveEntry({ ...cur, chat: [...(cur.chat ?? thread), { role: 'coach' as const, text: reply }] });
+      if (cur) saveEntry({ ...cur, chat: [...(cur.chat ?? thread), { role: 'coach' as const, text: reply.reply, ...(noted.length ? { noted } : {}) }] });
     });
   }
 
@@ -600,8 +615,8 @@ export default function HomeScreen() {
     const run = ++noteRun.current;
     const bias = rpeBias(useCoachLog.getState().nudges);
     const ctx = target.mode === 'week'
-      ? weekContext({ entries: thisWeekHistory, history: historyRef.current, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias })
-      : upcomingContext({ day: target.day, plan: weekPlan[target.day] ?? [], history: historyRef.current, gym: activeGym || undefined, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias });
+      ? weekContext({ entries: thisWeekHistory, history: historyRef.current, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias, athleteNotes: profileNotes() })
+      : upcomingContext({ day: target.day, plan: weekPlan[target.day] ?? [], history: historyRef.current, gym: activeGym || undefined, epoch: programEpoch, programWeek: currentWeek, rpeBias: bias, athleteNotes: profileNotes() });
     setNoteCtx(ctx);
     setNote(null);
     setNoteChat([]);
@@ -635,6 +650,15 @@ export default function HomeScreen() {
   const coachTitle = !coachTarget ? '' : coachTarget.mode === 'session'
     ? `SESSION ANALYSIS — ${coachEntry?.workoutName ?? ''} | ${coachEntry?.date ?? ''}`
     : coachTarget.mode === 'week' ? `WEEK ${currentWeek} REVIEW` : `NEXT UP — ${SPLIT[coachTarget.day]} | Wk ${currentWeek}`;
+
+  // After the app was closed on the summary screen, make the brief once the history it compares with has loaded.
+  useEffect(() => { runBriefRef.current = runBrief; });
+  useEffect(() => {
+    // weekPlanLoaded flips once the saved history has been read, including for a lifter who has none yet.
+    if (screen !== 'summary' || !needsBrief.current || !pendingRef.current || !weekPlanLoaded) return;
+    needsBrief.current = false;
+    runBriefRef.current?.(pendingRef.current);
+  }, [screen, history, weekPlanLoaded]);
 
   // The home buttons call through a ref: referencing openCoach directly makes the React Compiler lint
   // mistake the older rest-timer functions for render-time code.
@@ -704,7 +728,8 @@ export default function HomeScreen() {
       if (run !== noteRun.current) return;
       setAsking(false);
       if (!reply) { setAskFailed(true); return; }
-      setNoteChat([...thread, { role: 'coach' as const, text: reply }]);
+      const noted = addCoachNotes(reply.remember);
+      setNoteChat([...thread, { role: 'coach' as const, text: reply.reply, ...(noted.length ? { noted } : {}) }]);
     });
   }
 
@@ -980,6 +1005,7 @@ export default function HomeScreen() {
       }
       loadCoachLog();
       loadMachines();
+      loadCoachProfile();
       loadKeyOverride();
       const bwInfo = await FileSystem.getInfoAsync(BW_PATH);
       if (bwInfo.exists) {
@@ -1047,7 +1073,9 @@ export default function HomeScreen() {
         setFinalRest(saved.restTime);
         setExercises(saved.exercises);
         // A brief that was still on its way when the app died is offered again via Try again.
-        setBriefStatus(saved.brief ? 'ready' : 'failed');
+        // No brief yet (the app was closed on the summary): it is made as soon as history has loaded.
+        needsBrief.current = !saved.brief;
+        setBriefStatus(saved.brief ? 'ready' : 'loading');
         setScreen('summary');
       } else {
         // Restore active session if app was killed mid-session (e.g. Expo Go logout)
@@ -1522,6 +1550,14 @@ export default function HomeScreen() {
             setPendingEntry(rated);
             FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(rated)).catch(() => {});
             runBrief(rated);
+          }}
+          athleteNote={pendingEntry?.athleteNote}
+          onAthleteNote={text => {
+            if (!pendingEntry) return;
+            const said = { ...pendingEntry, athleteNote: text.trim() || undefined, brief: undefined };
+            setPendingEntry(said);
+            FileSystem.writeAsStringAsync(PENDING_PATH, JSON.stringify(said)).catch(() => {});
+            runBrief(said);
           }}
         />
       )}

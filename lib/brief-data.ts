@@ -42,7 +42,11 @@ export type BriefInput = {
     volumeKg: number;
     bodyweightKg?: number;
     feel?: string;
+    /** What the lifter said about why they trained this way today. */
+    athleteSays?: string;
   };
+  /** Lasting things the lifter has told the coach about how and why they train. */
+  athleteNotes?: string[];
   /** The lifter's own RPE tendency from accepted nudges: negative means they rate sets harder than the numbers support. */
   rpeCalibration?: { adjustmentPoints: number; samples: number };
   exercises: BriefExercise[];
@@ -103,6 +107,8 @@ export function buildBriefInput(args: {
   restSecs: number;
   bodyweight?: string;
   feel?: number;
+  athleteSays?: string;
+  athleteNotes?: string[];
   /** RPE points to add to logged RPEs, from the coach log. */
   rpeBias?: { bias: number; samples: number } | null;
 }): BriefInput {
@@ -165,7 +171,9 @@ export function buildBriefInput(args: {
       volumeKg: sessionVolume(exercises),
       ...(bodyweightKg > 0 ? { bodyweightKg } : {}),
       ...(args.feel ? { feel: `${args.feel} of 5 (1 rough, 5 great)` } : {}),
+      ...(args.athleteSays?.trim() ? { athleteSays: args.athleteSays.trim() } : {}),
     },
+    ...(args.athleteNotes?.length ? { athleteNotes: args.athleteNotes } : {}),
     ...(args.rpeBias ? { rpeCalibration: { adjustmentPoints: args.rpeBias.bias, samples: args.rpeBias.samples } } : {}),
     exercises: out,
     thisWeek: {
@@ -201,6 +209,7 @@ export function parseBrief(raw: unknown): SessionBrief | null {
     .map((f: any) => ({ flag: String(f.flag).trim(), reason: String(f.reason ?? '').trim(), recommendation: String(f.recommendation ?? '').trim() }))
     .slice(0, 3);
   const strong = strs(r.performance?.strong, 4), flagged = strs(r.performance?.flagged, 4);
-  if (!strong.length && !flagged.length && !targets.length && !flags.length) return null;
-  return { generatedAt: Date.now(), performance: { strong, flagged }, targets, flags };
+  if (!strong.length && !flagged.length && !targets.length && !flags.length && !(typeof r.read === 'string' && r.read.trim())) return null;
+  const read = typeof r.read === 'string' ? r.read.trim() : '';
+  return { generatedAt: Date.now(), ...(read ? { read } : {}), performance: { strong, flagged }, targets, flags };
 }

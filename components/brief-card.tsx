@@ -35,11 +35,12 @@ export function BriefCard({ title, status, brief, onRetry }: Props) {
 
       {status === 'ready' && brief && (
         <>
-          <Text style={s.section}>Performance</Text>
+          {!!brief.read && <Text style={s.read}>{brief.read}</Text>}
+          <Text style={s.section}>How it went</Text>
           {brief.performance.strong.map((l, i) => <Text key={`s${i}`} style={s.line}>+  {l}</Text>)}
-          {brief.performance.flagged.map((l, i) => <Text key={`f${i}`} style={s.line}>−  {l}</Text>)}
+          {brief.performance.flagged.map((l, i) => <Text key={`f${i}`} style={s.line}>·  {l}</Text>)}
 
-          {brief.targets.length > 0 && <Text style={s.section}>Next session targets</Text>}
+          {brief.targets.length > 0 && <Text style={s.section}>Next time</Text>}
           {brief.targets.map((t, i) => (
             <View key={i} style={s.targetRow}>
               <Text style={s.targetName}>{t.exercise}</Text>
@@ -48,7 +49,7 @@ export function BriefCard({ title, status, brief, onRetry }: Props) {
             </View>
           ))}
 
-          <Text style={s.section}>Flags</Text>
+          {brief.flags.length > 0 && <Text style={s.section}>Ideas to try</Text>}
           {brief.flags.map((f, i) => (
             <View key={i} style={s.flag}>
               <Text style={s.flagHead}>{f.flag}</Text>
@@ -69,6 +70,7 @@ const s = StyleSheet.create({
   dim: { fontSize: 14, color: Ink.textDim, marginTop: 10 },
   retry: { marginTop: 12, alignSelf: 'flex-start', borderWidth: 1, borderColor: Ink.line, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 18 },
   retryText: { fontSize: 14, color: Ink.text, fontWeight: '600' },
+  read: { fontSize: 16, color: Ink.text, lineHeight: 23, marginTop: 14 },
   section: { fontFamily: 'Unbounded_500Medium', fontSize: 11, color: Ink.textDim, marginTop: 18, marginBottom: 6, letterSpacing: 0.8, textTransform: 'uppercase' },
   line: { fontSize: 14, color: Ink.text, lineHeight: 20, marginBottom: 4 },
   targetRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Ink.line },

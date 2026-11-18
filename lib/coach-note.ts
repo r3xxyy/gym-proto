@@ -29,16 +29,16 @@ const RPE8 = 'Some exercises carry "rpe8Load", the weight estimated to land at R
 
 const WEEK_SYSTEM = (next: number) => `${BASE_SYSTEM}# Output (weekly review)
 Reply as JSON { "sections": [{ "heading": string, "lines": string[] }] } with exactly these three sections, every line short and numbers-first:
-1. "PERFORMANCE SUMMARY": up to 5 lines on what progressed, stalled or flagged across the week. Judge each lift only against its own basis.
-2. "PROGRAMME ADJUSTMENTS": at least one line, each written as "CHANGE: ... | REASON: ... | FROM: next session or next week". You propose, the athlete approves. Cite the mechanism for any substitution or structural change. Weigh hard sets per muscle against the priority order.
+1. "PERFORMANCE SUMMARY": up to 5 friendly lines on how the week went: what moved forward, what held steady, and what you think they were going for. Judge each lift only against its own basis.
+2. "PROGRAMME ADJUSTMENTS": up to two lines, only when a change would really help, each written as "IDEA: ... | WHY: ... | WHEN: next session or next week". These are options the athlete can take or leave. Mention the reason briefly for any substitution. Respect athleteNotes. Weigh hard sets per muscle against their priorities.
 3. "WEEK ${next} FOCUS": one line, one clear priority.
 ${RPE8}`;
 
 const UPCOMING_SYSTEM = `${BASE_SYSTEM}# Output (upcoming session)
 Reply as JSON { "sections": [{ "heading": string, "lines": string[] }] } with exactly these three sections, every line short and numbers-first:
 1. "TARGETS": one line per exercise: "Name: weight kg × reps × sets, RPE cap". Weight follows the progression logic and rpe8Load; use the target in DATA when there is no history to judge from.
-2. "FLAGS": at least one line, each written as "FLAG: ... | REASON: ... | RECOMMENDATION: ...". Include rest, session position and anything stale for three or more sessions.
-3. "FOCUS": one line, the single thing that matters most this session.
+2. "THINGS TO KEEP IN MIND": up to two lines, only if useful, each written as "IDEA: ... | WHY: ... | TRY: ...". Rest and session position are the usual ones. Leave out anything athleteNotes already explain.
+3. "FOCUS": one encouraging line on what to enjoy or aim for this session.
 ${RPE8}`;
 
 type Plan = Omit<Exercise, 'sets'>;
@@ -46,7 +46,7 @@ type Plan = Omit<Exercise, 'sets'>;
 export type NoteContext = object;
 
 /** Everything the coach may see for a week review: each finished session built like a session brief, judged against what came before it. */
-export function weekContext(a: { entries: HistoryEntry[]; history: HistoryEntry[]; epoch: number; programWeek: number; rpeBias?: { bias: number; samples: number } | null }): NoteContext {
+export function weekContext(a: { entries: HistoryEntry[]; history: HistoryEntry[]; epoch: number; programWeek: number; rpeBias?: { bias: number; samples: number } | null; athleteNotes?: string[] }): NoteContext {
   const sessions = a.entries
     .filter(e => !e.isRestDay && e.exercises.some(ex => loggedSets(ex).length))
     .sort((x, y) => (x.date < y.date ? -1 : 1))
@@ -57,6 +57,7 @@ export function weekContext(a: { entries: HistoryEntry[]; history: HistoryEntry[
   const last = sessions[sessions.length - 1];
   return {
     programWeek: a.programWeek,
+    ...(a.athleteNotes?.length ? { athleteNotes: a.athleteNotes } : {}),
     sessions: sessions.map(s => ({ session: s.session, exercises: s.exercises })),
     ...(last ? { hardSetsByMuscle: last.thisWeek.hardSetsByMuscle } : {}),
     ...(last?.deloadHint ? { deloadHint: last.deloadHint } : {}),
@@ -65,7 +66,7 @@ export function weekContext(a: { entries: HistoryEntry[]; history: HistoryEntry[
 }
 
 /** What the coach may see before a planned session: the plan, how each lift went last time on the same footing, and the RPE 8 load. */
-export function upcomingContext(a: { day: number; plan: Plan[]; history: HistoryEntry[]; gym?: string; epoch: number; programWeek: number; rpeBias?: { bias: number; samples: number } | null }): NoteContext {
+export function upcomingContext(a: { day: number; plan: Plan[]; history: HistoryEntry[]; gym?: string; epoch: number; programWeek: number; rpeBias?: { bias: number; samples: number } | null; athleteNotes?: string[] }): NoteContext {
   const workout = SPLIT[a.day];
   const exercises = a.plan.map(ex => {
     const { basis, rows } = previousSessions(ex.name, workout, a.history, a.gym);
@@ -82,6 +83,7 @@ export function upcomingContext(a: { day: number; plan: Plan[]; history: History
   const hint = deloadHint(a.history, a.epoch, a.programWeek);
   return {
     workout, ...(a.gym ? { gym: a.gym } : {}), programWeek: a.programWeek, exercises,
+    ...(a.athleteNotes?.length ? { athleteNotes: a.athleteNotes } : {}),
     ...(hint ? { deloadHint: hint } : {}),
     ...(lastBrief?.brief ? { lastBrief: { date: lastBrief.date, targets: lastBrief.brief.targets, flags: lastBrief.brief.flags.map(f => f.flag) } } : {}),
   };

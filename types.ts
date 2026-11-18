@@ -31,6 +31,8 @@ export type Exercise = {
 /** The in-app coach's read of a finished session; kept on the history entry so the next brief can refer back to it. */
 export type SessionBrief = {
   generatedAt: number;
+  /** One or two friendly sentences on what the lifter seemed to be going for. */
+  read?: string;
   performance: { strong: string[]; flagged: string[] };
   targets: { exercise: string; weightKg: number | null; sets: number; reps: string; rpeCap: number | null; note: string }[];
   flags: { flag: string; reason: string; recommendation: string }[];
@@ -39,7 +41,7 @@ export type SessionBrief = {
 /** A coach read that is not tied to one finished session: a week review or an upcoming-session plan. */
 export type CoachNote = { generatedAt: number; sections: { heading: string; lines: string[] }[] };
 
-export type ChatMessage = { role: 'athlete' | 'coach'; text: string };
+export type ChatMessage = { role: 'athlete' | 'coach'; text: string; /** Lasting facts the coach saved from this reply. */ noted?: string[] };
 
 export type HistoryEntry = {
   id: string;
@@ -55,6 +57,8 @@ export type HistoryEntry = {
   feel?: number;
   /** Follow-up questions about the brief and the coach's answers. */
   chat?: ChatMessage[];
+  /** Why the lifter trained the way they did today, in their own words. */
+  athleteNote?: string;
 };
 
 export type UnlockedBadge = {

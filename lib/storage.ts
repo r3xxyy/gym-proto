@@ -16,3 +16,4 @@ export const DELOAD_PATH        = FileSystem.documentDirectory + 'deloadDismisse
 export const COACH_PATH        = FileSystem.documentDirectory + 'coachLog.json';
 export const MACHINES_PATH     = FileSystem.documentDirectory + 'machines.json';
 export const GEMINI_KEY_PATH   = FileSystem.documentDirectory + 'geminiKey.json';
+export const COACH_PROFILE_PATH = FileSystem.documentDirectory + 'coachProfile.json';

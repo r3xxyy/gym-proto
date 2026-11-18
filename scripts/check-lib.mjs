@@ -11,7 +11,7 @@ const out = mkdtempSync(join(tmpdir(), 'gym-lib-'));
 try {
   execFileSync('npx', ['tsc', 'lib/progress.ts', 'lib/session-stats.ts', 'lib/progression.ts', 'lib/deload.ts', 'lib/format.ts',
     'lib/prev-sessions.ts', 'lib/history-lookup.ts', 'lib/rest.ts', 'lib/rpe-load.ts', 'lib/rpe-bias.ts', 'lib/rpe-gate.ts',
-    'lib/tick-timing.ts', 'lib/brief-data.ts', 'lib/gemini-models.ts', 'lib/gemini-errors.ts', 'lib/machine-plan.ts', 'lib/muscles.ts', 'constants/programs.ts', 'types.ts', '--outDir', out, '--rootDir', '.', '--module', 'commonjs', '--target', 'es2020',
+    'lib/tick-timing.ts', 'lib/brief-data.ts', 'lib/gemini-models.ts', 'lib/gemini-errors.ts', 'lib/coach-notes.ts', 'lib/machine-plan.ts', 'lib/muscles.ts', 'constants/programs.ts', 'types.ts', '--outDir', out, '--rootDir', '.', '--module', 'commonjs', '--target', 'es2020',
     '--skipLibCheck', '--strict', '--ignoreConfig'], { stdio: 'inherit' });
   const req = createRequire(join(out, 'x.js'));
   const { estimate1RM, countedSets, exerciseSeries, personalRecords } = req('./lib/progress.js');
@@ -26,6 +26,7 @@ try {
   const { previousSessions } = req('./lib/prev-sessions.js');
   const { pickModels } = req('./lib/gemini-models.js');
   const { classify429 } = req('./lib/gemini-errors.js');
+  const { cleanRemember, capNotes, MAX_NOTES } = req('./lib/coach-notes.js');
   const { candidatesFor, validateScan, firstSet, targetFor } = req('./lib/machine-plan.js');
   const { normalizeMuscles, MUSCLES } = req('./lib/muscles.js');
   const { buildBriefInput, parseBrief } = req('./lib/brief-data.js');
@@ -304,6 +305,29 @@ try {
     assert.equal(classify429({ error: { status: 'UNAVAILABLE', message: 'overloaded' } }).kind, 'busy');
     assert.equal(classify429(null).retryMs, 60000);                                      // unreadable body: wait a minute
     assert.equal(classify429({ error: { message: 'quota', details: [{ retryDelay: '999999s' }] } }).retryMs, 24 * 3600 * 1000);   // capped at a day
+  });
+
+  check('remembered facts: trimmed, short, no repeats, capped per reply and overall', () => {
+    assert.deepEqual(cleanRemember(['  keeps curls at 2 sets   on purpose ', 'ok'], []), ['keeps curls at 2 sets on purpose']);   // too-short dropped
+    assert.deepEqual(cleanRemember(['Keeps curls at 2 sets on purpose'], ['keeps curls at 2 sets on purpose']), []);        // already known
+    assert.equal(cleanRemember(['aaaa one', 'bbbb two', 'cccc three', 'dddd four'], []).length, 3);
+    assert.equal(cleanRemember(['x'.repeat(400)], [])[0].length, 160);
+    assert.deepEqual(cleanRemember('not a list', []), []);
+    assert.deepEqual(cleanRemember([5, null, { a: 1 }], []), []);
+    assert.equal(capNotes(Array.from({ length: 40 }, (_, i) => i)).length, MAX_NOTES);
+  });
+
+  check('what the lifter told the coach reaches the brief data, and the friendly read is kept', () => {
+    const base = { workout: 'Leg A', date: 'Mon, 16 Nov 2026', gym: 'AF Stratford', exercises: [hack([done(100, 8, 8)])], history: hist, epoch: new Date(2026, 3, 13).getTime(), programWeek: 32, liftingSecs: 1, restSecs: 1 };
+    const withNotes = buildBriefInput({ ...base, athleteNotes: ['keeps curls at 2 sets on purpose'], athleteSays: '  held the weight on purpose  ' });
+    assert.deepEqual(withNotes.athleteNotes, ['keeps curls at 2 sets on purpose']);
+    assert.equal(withNotes.session.athleteSays, 'held the weight on purpose');
+    const plain = buildBriefInput(base);
+    assert.equal('athleteNotes' in plain, false);
+    assert.equal('athleteSays' in plain.session, false);
+    const b = parseBrief({ read: ' Looks like you were pushing legs. ', performance: { strong: [], flagged: [] }, targets: [], flags: [] });
+    assert.equal(b.read, 'Looks like you were pushing legs.');                         // a read alone is a usable brief
+    assert.equal(parseBrief({ performance: { strong: [], flagged: [] }, targets: [], flags: [] }), null);
   });
 
   console.log(`\n${passed} checks passed`);
